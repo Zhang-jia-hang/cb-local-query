@@ -141,6 +141,13 @@ def build_where_clause(
     return " WHERE " + " AND ".join(where_parts), params
 
 
+def build_order_clause(columns: list[str], sort_field: str, sort_order: str) -> str:
+    if sort_field not in columns:
+        return ""
+    direction = "DESC" if (sort_order or "").lower() == "desc" else "ASC"
+    return f" ORDER BY {_quote_ident(sort_field)} {direction}"
+
+
 def query_table(
     table: str,
     page: int,
@@ -149,6 +156,8 @@ def query_table(
     single_field: str,
     single_keyword: str,
     field_filters: dict[str, str],
+    sort_field: str,
+    sort_order: str,
 ) -> dict[str, Any]:
     tables = list_tables()
     if table not in tables:
@@ -158,6 +167,7 @@ def query_table(
     where_clause, params = build_where_clause(
         columns, global_keyword, single_field, single_keyword, field_filters
     )
+    order_clause = build_order_clause(columns, sort_field, sort_order)
 
     safe_page = max(1, page)
     safe_size = min(MAX_PAGE_SIZE, max(1, page_size))
@@ -168,7 +178,7 @@ def query_table(
             f"SELECT COUNT(1) AS c FROM {_quote_ident(table)}{where_clause}", params
         ).fetchone()["c"]
         rows = conn.execute(
-            f"SELECT * FROM {_quote_ident(table)}{where_clause} LIMIT ? OFFSET ?",
+            f"SELECT * FROM {_quote_ident(table)}{where_clause}{order_clause} LIMIT ? OFFSET ?",
             [*params, safe_size, offset],
         ).fetchall()
 
@@ -190,6 +200,8 @@ def fetch_all_rows_for_export(
     single_field: str,
     single_keyword: str,
     field_filters: dict[str, str],
+    sort_field: str,
+    sort_order: str,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     tables = list_tables()
     if table not in tables:
@@ -199,10 +211,11 @@ def fetch_all_rows_for_export(
     where_clause, params = build_where_clause(
         columns, global_keyword, single_field, single_keyword, field_filters
     )
+    order_clause = build_order_clause(columns, sort_field, sort_order)
 
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT * FROM {_quote_ident(table)}{where_clause}",
+            f"SELECT * FROM {_quote_ident(table)}{where_clause}{order_clause}",
             params,
         ).fetchall()
 
@@ -216,8 +229,19 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
         single_field=payload.get("single_field", "").strip(),
         single_keyword=payload.get("single_keyword", "").strip(),
         field_filters=payload.get("field_filters") or {},
+        sort_field=payload.get("sort_field", "").strip(),
+        sort_order=payload.get("sort_order", "asc").strip(),
     )
-    df = pd.DataFrame(rows, columns=columns)
+
+    visible_columns = payload.get("visible_columns") or []
+    if isinstance(visible_columns, list) and visible_columns:
+        export_columns = [c for c in columns if c in visible_columns]
+        if not export_columns:
+            export_columns = columns
+    else:
+        export_columns = columns
+
+    df = pd.DataFrame(rows, columns=export_columns)
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=table[:31] or "result")
@@ -283,6 +307,8 @@ def create_app() -> Flask:
                 single_field=(payload.get("single_field") or "").strip(),
                 single_keyword=(payload.get("single_keyword") or "").strip(),
                 field_filters=payload.get("field_filters") or {},
+                sort_field=(payload.get("sort_field") or "").strip(),
+                sort_order=(payload.get("sort_order") or "asc").strip(),
             )
             return jsonify(result)
         except ValueError as ex:

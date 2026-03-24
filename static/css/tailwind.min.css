@@ -58,6 +58,7 @@ body {
 .font-semibold { font-weight: 600; }
 .text-slate-600 { color: var(--muted); }
 .text-slate-800 { color: var(--text); }
+.text-red-600 { color: var(--danger); }
 .bg-slate-50 { min-height: 100vh; }
 
 .app-shell {
@@ -274,6 +275,24 @@ body {
   color: var(--danger);
 }
 .btn-danger:hover { background: #ffefef; }
+
+.field-toggle-group {
+  display: inline-flex;
+  border: 1px solid #d5dfed;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.btn-toggle {
+  border: 0;
+  border-right: 1px solid #d5dfed;
+  border-radius: 0;
+}
+.btn-toggle:last-child { border-right: 0; }
+.btn-toggle.active {
+  background: #e8f1ff;
+  color: #0d4fb2;
+  font-weight: 600;
+}
 
 .table-wrap {
   overflow: auto;

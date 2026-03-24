@@ -5,6 +5,11 @@
   page: 1,
   totalPages: 1,
   total: 0,
+  fieldViewMode: "all",
+  lastRows: [],
+  lastColumns: [],
+  lastUsedFields: [],
+  currentVisibleColumns: [],
 };
 
 const els = {
@@ -17,11 +22,15 @@ const els = {
   pageSize: document.getElementById("pageSize"),
   singleField: document.getElementById("singleField"),
   singleKeyword: document.getElementById("singleKeyword"),
+  sortField: document.getElementById("sortField"),
+  sortOrder: document.getElementById("sortOrder"),
   addFilterBtn: document.getElementById("addFilterBtn"),
   filters: document.getElementById("filters"),
   searchBtn: document.getElementById("searchBtn"),
   resetBtn: document.getElementById("resetBtn"),
   exportBtn: document.getElementById("exportBtn"),
+  showAllFieldsBtn: document.getElementById("showAllFieldsBtn"),
+  showUsedFieldsBtn: document.getElementById("showUsedFieldsBtn"),
   queryMsg: document.getElementById("queryMsg"),
   resultTable: document.getElementById("resultTable"),
   prevBtn: document.getElementById("prevBtn"),
@@ -51,6 +60,11 @@ function refreshCurrentTableTag() {
   els.currentTableTag.textContent = state.currentTable
     ? `当前表：${state.currentTable}`
     : "当前表：未选择";
+}
+
+function updateFieldToggleButtons() {
+  els.showAllFieldsBtn.classList.toggle("active", state.fieldViewMode === "all");
+  els.showUsedFieldsBtn.classList.toggle("active", state.fieldViewMode === "used");
 }
 
 async function fetchJson(url, options = {}) {
@@ -93,9 +107,9 @@ function renderTableList() {
     nameBtn.textContent = table;
     nameBtn.onclick = async () => {
       state.currentTable = table;
+      state.page = 1;
       renderTableList();
       await loadColumns();
-      state.page = 1;
       await doQuery();
     };
 
@@ -123,6 +137,10 @@ async function loadTables() {
   if (!state.tables.length) {
     state.currentTable = "";
     state.columns = [];
+    state.lastColumns = [];
+    state.lastRows = [];
+    state.lastUsedFields = [];
+    state.currentVisibleColumns = [];
     refreshFieldSelectors();
     renderTableList();
     clearTableView("暂无数据，请先导入 Excel");
@@ -153,8 +171,13 @@ async function loadColumns() {
 function refreshFieldSelectors() {
   els.singleField.innerHTML = "";
   els.singleField.appendChild(createOption("", "不使用"));
+
+  els.sortField.innerHTML = "";
+  els.sortField.appendChild(createOption("", "不排序"));
+
   state.columns.forEach((col) => {
     els.singleField.appendChild(createOption(col, col));
+    els.sortField.appendChild(createOption(col, col));
   });
 
   const rows = Array.from(els.filters.querySelectorAll(".filter-row"));
@@ -217,12 +240,49 @@ function collectPayload() {
     single_field: els.singleField.value,
     single_keyword: (els.singleKeyword.value || "").trim(),
     field_filters: fieldFilters,
+    sort_field: els.sortField.value,
+    sort_order: els.sortOrder.value,
   };
+}
+
+function resolveUsedFieldsFromPayload(payload) {
+  if (!payload) return [];
+  if (payload.global_keyword) return [...state.lastColumns];
+
+  const used = new Set();
+  if (payload.single_field && payload.single_keyword) {
+    used.add(payload.single_field);
+  }
+  Object.keys(payload.field_filters || {}).forEach((k) => used.add(k));
+  if (payload.sort_field) {
+    used.add(payload.sort_field);
+  }
+
+  const usedCols = state.lastColumns.filter((c) => used.has(c));
+  return usedCols.length ? usedCols : [...state.lastColumns];
+}
+
+function getVisibleColumns() {
+  if (!state.lastColumns.length) return [];
+  if (state.fieldViewMode === "all") {
+    return [...state.lastColumns];
+  }
+  return state.lastUsedFields.length ? [...state.lastUsedFields] : [...state.lastColumns];
+}
+
+function renderCurrentResult() {
+  if (!state.lastColumns.length) {
+    clearTableView("暂无数据");
+    return;
+  }
+  const visibleColumns = getVisibleColumns();
+  state.currentVisibleColumns = visibleColumns;
+  renderTable(visibleColumns, state.lastRows);
 }
 
 function renderTable(columns, rows) {
   if (!columns || columns.length === 0) {
-    clearTableView("暂无数据");
+    clearTableView("暂无可见字段");
     return;
   }
 
@@ -290,7 +350,11 @@ async function doQuery() {
     state.total = data.total;
     state.totalPages = data.total_pages;
     state.page = data.page;
-    renderTable(data.columns, data.rows);
+    state.lastColumns = data.columns || [];
+    state.lastRows = data.rows || [];
+    state.lastUsedFields = resolveUsedFieldsFromPayload(payload);
+
+    renderCurrentResult();
     els.pageInfo.textContent = `第 ${state.page} / ${state.totalPages} 页，共 ${state.total} 条`;
     setMessage(els.queryMsg, "查询完成");
   } catch (err) {
@@ -332,6 +396,11 @@ async function doExport() {
     return;
   }
 
+  const visibleColumns = state.currentVisibleColumns.length
+    ? [...state.currentVisibleColumns]
+    : [...state.lastColumns];
+  payload.visible_columns = visibleColumns;
+
   try {
     const res = await fetch("/api/export", {
       method: "POST",
@@ -357,7 +426,7 @@ async function doExport() {
     a.download = match?.[1] || "query_result.xlsx";
     a.click();
     URL.revokeObjectURL(url);
-    setMessage(els.queryMsg, "导出成功");
+    setMessage(els.queryMsg, `导出成功（${visibleColumns.length} 个字段）`);
   } catch (err) {
     setMessage(els.queryMsg, err.message || "导出失败", true);
   }
@@ -374,11 +443,26 @@ function bindEvents() {
     els.globalKeyword.value = "";
     els.singleField.value = "";
     els.singleKeyword.value = "";
+    els.sortField.value = "";
+    els.sortOrder.value = "asc";
     els.filters.innerHTML = "";
     state.page = 1;
+    addFilterRow();
     await doQuery();
   };
   els.exportBtn.onclick = doExport;
+
+  els.showAllFieldsBtn.onclick = () => {
+    state.fieldViewMode = "all";
+    updateFieldToggleButtons();
+    renderCurrentResult();
+  };
+  els.showUsedFieldsBtn.onclick = () => {
+    state.fieldViewMode = "used";
+    updateFieldToggleButtons();
+    renderCurrentResult();
+  };
+
   els.prevBtn.onclick = async () => {
     if (state.page <= 1) return;
     state.page -= 1;
@@ -397,6 +481,7 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  updateFieldToggleButtons();
   addFilterRow();
   await loadTables();
   if (state.currentTable) {

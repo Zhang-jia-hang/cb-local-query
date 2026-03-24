@@ -74,6 +74,20 @@
           </div>
         </div>
 
+        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="label">字段排序</label>
+            <select id="sortField" class="input"></select>
+          </div>
+          <div>
+            <label class="label">排序方向</label>
+            <select id="sortOrder" class="input">
+              <option value="asc" selected>升序</option>
+              <option value="desc">降序</option>
+            </select>
+          </div>
+        </div>
+
         <div class="mb-3">
           <div class="flex items-center justify-between mb-2">
             <label class="label">多字段组合查询（AND）</label>
@@ -93,7 +107,11 @@
       <section class="card result-card">
         <div class="section-head mb-3">
           <h2 class="text-lg font-semibold">查询结果</h2>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="field-toggle-group">
+              <button id="showAllFieldsBtn" class="btn btn-toggle active">显示全部字段</button>
+              <button id="showUsedFieldsBtn" class="btn btn-toggle">仅显示本次查询字段</button>
+            </div>
             <button id="prevBtn" class="btn">上一页</button>
             <span id="pageInfo" class="text-sm"></span>
             <button id="nextBtn" class="btn">下一页</button>
