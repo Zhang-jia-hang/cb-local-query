@@ -1,0 +1,11 @@
+﻿# Local sqlite file
+/data/app.db
+
+# Python env and build outputs
+/.venv/
+/__pycache__/
+/*.spec
+/build/
+/dist/
+
+.idea
