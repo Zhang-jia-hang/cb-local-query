@@ -10,6 +10,7 @@ const els = {
   excelFile: document.getElementById("excelFile"),
   importBtn: document.getElementById("importBtn"),
   importMsg: document.getElementById("importMsg"),
+  tableList: document.getElementById("tableList"),
   tableSelect: document.getElementById("tableSelect"),
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
@@ -56,6 +57,35 @@ async function fetchJson(url, options = {}) {
   return null;
 }
 
+function renderTableList() {
+  if (!els.tableList) return;
+  els.tableList.innerHTML = "";
+
+  if (!state.tables.length) {
+    const p = document.createElement("p");
+    p.className = "table-empty";
+    p.textContent = "暂无数据表";
+    els.tableList.appendChild(p);
+    return;
+  }
+
+  const current = els.tableSelect.value;
+  state.tables.forEach((table) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `table-item${current === table ? " active" : ""}`;
+    btn.textContent = table;
+    btn.onclick = async () => {
+      els.tableSelect.value = table;
+      renderTableList();
+      await loadColumns();
+      state.page = 1;
+      await doQuery();
+    };
+    els.tableList.appendChild(btn);
+  });
+}
+
 async function loadTables() {
   const data = await fetchJson("/api/tables");
   state.tables = data.tables || [];
@@ -63,6 +93,7 @@ async function loadTables() {
   els.tableSelect.innerHTML = "";
   if (state.tables.length === 0) {
     els.tableSelect.appendChild(createOption("", "暂无数据表，请先导入 Excel"));
+    renderTableList();
     state.columns = [];
     refreshFieldSelectors();
     return;
@@ -72,6 +103,7 @@ async function loadTables() {
     els.tableSelect.appendChild(createOption(table, table));
   });
 
+  renderTableList();
   await loadColumns();
 }
 
@@ -281,6 +313,7 @@ async function doExport() {
 function bindEvents() {
   els.importBtn.onclick = doImport;
   els.tableSelect.onchange = async () => {
+    renderTableList();
     await loadColumns();
     state.page = 1;
     await doQuery();

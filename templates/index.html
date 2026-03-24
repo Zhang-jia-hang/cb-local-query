@@ -7,80 +7,92 @@
   <link rel="stylesheet" href="/static/css/tailwind.min.css" />
 </head>
 <body class="bg-slate-50 text-slate-800">
-  <div class="container mx-auto px-4 py-4 max-w-7xl">
+  <div class="app-shell container mx-auto px-4 py-4 max-w-7xl">
+    <aside class="sidebar">
+      <section class="card card-hero mb-4">
+        <h1 class="text-2xl font-bold mb-2">勤博数据查询系统</h1>
+        <p class="text-sm text-slate-600">纯本地运行，导入后即可查询与导出</p>
+      </section>
 
-    <section class="card mb-4">
-      <h2 class="text-lg font-semibold mb-3">1. 导入 Excel</h2>
-      <div class="flex flex-wrap gap-2 items-center">
-        <input id="excelFile" type="file" accept=".xlsx,.xls" class="input max-w-sm" />
-        <button id="importBtn" class="btn btn-primary">导入并建表</button>
-      </div>
-      <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
-    </section>
+      <section class="card card-side mb-4">
+        <h2 class="text-lg font-semibold mb-3">已导入数据表</h2>
+        <div id="tableList" class="table-list">
+          <p class="table-empty">暂无数据表</p>
+        </div>
+        <div class="import-box">
+          <label class="label">导入 Excel</label>
+          <input id="excelFile" type="file" accept=".xlsx,.xls" class="input" />
+          <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
+          <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
+        </div>
+      </section>
+    </aside>
 
-    <section class="card mb-4">
-      <h2 class="text-lg font-semibold mb-3">2. 查询条件</h2>
+    <main class="main-content">
+      <section class="card mb-4">
+        <h2 class="text-lg font-semibold mb-3">查询条件</h2>
 
-      <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
-        <div>
-          <label class="label">数据表</label>
-          <select id="tableSelect" class="input"></select>
+        <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
+          <div>
+            <label class="label">当前数据表</label>
+            <select id="tableSelect" class="input"></select>
+          </div>
+          <div>
+            <label class="label">全局模糊查询</label>
+            <input id="globalKeyword" class="input" placeholder="关键词" />
+          </div>
+          <div>
+            <label class="label">每页条数</label>
+            <select id="pageSize" class="input">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label class="label">全局模糊查询</label>
-          <input id="globalKeyword" class="input" placeholder="关键词" />
-        </div>
-        <div>
-          <label class="label">每页条数</label>
-          <select id="pageSize" class="input">
-            <option value="10">10</option>
-            <option value="20" selected>20</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-        </div>
-      </div>
 
-      <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
-        <div>
-          <label class="label">单字段模糊查询 - 字段</label>
-          <select id="singleField" class="input"></select>
+        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="label">单字段模糊查询 - 字段</label>
+            <select id="singleField" class="input"></select>
+          </div>
+          <div>
+            <label class="label">单字段模糊查询 - 关键词</label>
+            <input id="singleKeyword" class="input" placeholder="例如：张三" />
+          </div>
         </div>
-        <div>
-          <label class="label">单字段模糊查询 - 关键词</label>
-          <input id="singleKeyword" class="input" placeholder="例如：张三" />
-        </div>
-      </div>
 
-      <div class="mb-3">
-        <div class="flex items-center justify-between mb-2">
-          <label class="label">多字段组合查询（AND）</label>
-          <button id="addFilterBtn" class="btn btn-secondary">新增条件</button>
+        <div class="mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <label class="label">多字段组合查询（AND）</label>
+            <button id="addFilterBtn" class="btn btn-secondary">新增条件</button>
+          </div>
+          <div id="filters" class="space-y-2"></div>
         </div>
-        <div id="filters" class="space-y-2"></div>
-      </div>
 
-      <div class="flex flex-wrap gap-2">
-        <button id="searchBtn" class="btn btn-primary">查询</button>
-        <button id="resetBtn" class="btn">重置</button>
-        <button id="exportBtn" class="btn btn-success">导出当前结果 Excel</button>
-      </div>
-      <p id="queryMsg" class="text-sm mt-2 text-slate-600"></p>
-    </section>
-
-    <section class="card">
-      <div class="flex flex-wrap items-center justify-between mb-3">
-        <h2 class="text-lg font-semibold">3. 查询结果</h2>
-        <div class="flex items-center gap-2">
-          <button id="prevBtn" class="btn">上一页</button>
-          <span id="pageInfo" class="text-sm"></span>
-          <button id="nextBtn" class="btn">下一页</button>
+        <div class="flex flex-wrap gap-2">
+          <button id="searchBtn" class="btn btn-primary">查询</button>
+          <button id="resetBtn" class="btn">重置</button>
+          <button id="exportBtn" class="btn btn-success">导出当前结果 Excel</button>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table id="resultTable" class="table"></table>
-      </div>
-    </section>
+        <p id="queryMsg" class="text-sm mt-2 text-slate-600"></p>
+      </section>
+
+      <section class="card">
+        <div class="flex flex-wrap items-center justify-between mb-3">
+          <h2 class="text-lg font-semibold">查询结果</h2>
+          <div class="flex items-center gap-2">
+            <button id="prevBtn" class="btn">上一页</button>
+            <span id="pageInfo" class="text-sm"></span>
+            <button id="nextBtn" class="btn">下一页</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="resultTable" class="table"></table>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script src="/static/js/app.js"></script>
