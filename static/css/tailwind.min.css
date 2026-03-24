@@ -1,15 +1,14 @@
 ﻿:root {
   --bg: #f4f7fb;
-  --bg-soft: #eef4ff;
   --text: #142136;
   --muted: #617188;
   --line: #d6deea;
-  --card: rgba(255, 255, 255, 0.88);
+  --card: rgba(255, 255, 255, 0.9);
   --primary: #0f6fff;
   --primary-600: #0a5fe0;
-  --secondary: #0ea5a4;
   --success: #1d9f63;
   --danger: #d94848;
+  --sidebar-w: 320px;
 }
 
 * { box-sizing: border-box; }
@@ -17,7 +16,7 @@ body {
   margin: 0;
   font-family: "Bahnschrift", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
   line-height: 1.45;
-  background: linear-gradient(180deg, var(--bg) 0%, #edf3ff 55%, #f6f9ff 100%);
+  background: linear-gradient(180deg, #f4f7fb 0%, #edf3ff 55%, #f6f9ff 100%);
   color: var(--text);
 }
 
@@ -64,12 +63,24 @@ body {
 .app-shell {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 1rem;
+  width: 100%;
 }
-.sidebar,
-.main-content { min-width: 0; }
+
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sidebar-w);
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.main-content {
+  margin-left: var(--sidebar-w);
+  padding: 1rem;
+  width: calc(100% - var(--sidebar-w));
+}
 
 .card {
   border: 1px solid var(--line);
@@ -143,6 +154,13 @@ body {
   overflow: auto;
 }
 
+.table-row {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  gap: .4rem;
+  margin-bottom: .4rem;
+}
+
 .table-item {
   width: 100%;
   text-align: left;
@@ -152,7 +170,6 @@ body {
   background: transparent;
   color: #1e3a5f;
   cursor: pointer;
-  margin-bottom: .4rem;
   transition: all .18s ease;
 }
 .table-item:hover {
@@ -164,6 +181,10 @@ body {
   background: linear-gradient(180deg, #e9f3ff 0%, #deecff 100%);
   color: #0a4eac;
   font-weight: 600;
+}
+.table-delete {
+  padding: .45rem 0;
+  min-width: 0;
 }
 .table-empty { color: var(--muted); margin: 0; font-size: .9rem; }
 
@@ -188,6 +209,7 @@ body {
 .space-y-2 > * + * { margin-top: .5rem; }
 .max-w-sm { max-width: 360px; }
 .w-full { width: 100%; }
+.p-3 { padding: .75rem; }
 
 .label {
   display: inline-block;
@@ -282,7 +304,16 @@ body {
 }
 
 @media (max-width: 960px) {
-  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: static;
+    width: 100%;
+    padding: 1rem;
+  }
+  .main-content {
+    margin-left: 0;
+    width: 100%;
+    padding: 0 1rem 1rem 1rem;
+  }
   .side-card { min-height: auto; }
   .table-list { max-height: 220px; min-height: 120px; }
 }

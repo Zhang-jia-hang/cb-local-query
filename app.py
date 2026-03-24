@@ -20,7 +20,6 @@ DB_PATH = DATA_DIR / "app.db"
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 200
 
-
 _IDENTIFIER_SAFE_RE = re.compile(r"[^0-9A-Za-z_\u4e00-\u9fff]")
 
 
@@ -39,7 +38,7 @@ def _normalize_identifier(raw: str, fallback: str) -> str:
 
 
 def _quote_ident(name: str) -> str:
-    return f'"{name.replace("\"", "\"\"")}"'
+    return '"' + name.replace('"', '""') + '"'
 
 
 def get_conn() -> sqlite3.Connection:
@@ -60,6 +59,15 @@ def get_columns(table: str) -> list[str]:
     with get_conn() as conn:
         rows = conn.execute(f"PRAGMA table_info({_quote_ident(table)})").fetchall()
     return [r["name"] for r in rows]
+
+
+def delete_table(table: str) -> None:
+    tables = list_tables()
+    if table not in tables:
+        raise ValueError("table not found")
+    with get_conn() as conn:
+        conn.execute(f"DROP TABLE {_quote_ident(table)}")
+        conn.commit()
 
 
 def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
@@ -233,6 +241,16 @@ def create_app() -> Flask:
         if table not in tables:
             return jsonify({"error": "table not found"}), 404
         return jsonify({"columns": get_columns(table)})
+
+    @app.delete("/api/table/<table>")
+    def api_delete_table(table: str):
+        try:
+            delete_table(table)
+            return jsonify({"deleted": table})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 404
+        except Exception as ex:
+            return jsonify({"error": f"删除失败: {ex}"}), 500
 
     @app.post("/api/import-excel")
     def api_import_excel():

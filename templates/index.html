@@ -10,7 +10,7 @@
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
 
-  <div class="app-shell container mx-auto px-4 py-4 max-w-7xl">
+  <div class="app-shell">
     <aside class="sidebar">
       <section class="card hero mb-4">
         <p class="kicker">LOCAL DATA WORKBENCH</p>
@@ -42,16 +42,12 @@
         <div class="section-head mb-3">
           <h2 class="text-lg font-semibold">查询条件</h2>
           <div class="chips">
-            <span class="chip">全局检索</span>
+            <span class="chip" id="currentTableTag">当前表：未选择</span>
             <span class="chip">字段组合</span>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
-          <div>
-            <label class="label">当前数据表</label>
-            <select id="tableSelect" class="input"></select>
-          </div>
+        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
           <div>
             <label class="label">全局模糊查询</label>
             <input id="globalKeyword" class="input" placeholder="输入关键词" />

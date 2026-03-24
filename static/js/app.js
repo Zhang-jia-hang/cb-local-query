@@ -1,6 +1,7 @@
 ﻿const state = {
   tables: [],
   columns: [],
+  currentTable: "",
   page: 1,
   totalPages: 1,
   total: 0,
@@ -11,7 +12,7 @@ const els = {
   importBtn: document.getElementById("importBtn"),
   importMsg: document.getElementById("importMsg"),
   tableList: document.getElementById("tableList"),
-  tableSelect: document.getElementById("tableSelect"),
+  currentTableTag: document.getElementById("currentTableTag"),
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
   singleField: document.getElementById("singleField"),
@@ -40,6 +41,18 @@ function createOption(value, label) {
   return op;
 }
 
+function clearTableView(message = "暂无数据") {
+  els.resultTable.innerHTML = `<tr><td class='p-3'>${message}</td></tr>`;
+  els.pageInfo.textContent = "";
+}
+
+function refreshCurrentTableTag() {
+  if (!els.currentTableTag) return;
+  els.currentTableTag.textContent = state.currentTable
+    ? `当前表：${state.currentTable}`
+    : "当前表：未选择";
+}
+
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const contentType = res.headers.get("content-type") || "";
@@ -66,49 +79,66 @@ function renderTableList() {
     p.className = "table-empty";
     p.textContent = "暂无数据表";
     els.tableList.appendChild(p);
+    refreshCurrentTableTag();
     return;
   }
 
-  const current = els.tableSelect.value;
   state.tables.forEach((table) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = `table-item${current === table ? " active" : ""}`;
-    btn.textContent = table;
-    btn.onclick = async () => {
-      els.tableSelect.value = table;
+    const row = document.createElement("div");
+    row.className = "table-row";
+
+    const nameBtn = document.createElement("button");
+    nameBtn.type = "button";
+    nameBtn.className = `table-item${state.currentTable === table ? " active" : ""}`;
+    nameBtn.textContent = table;
+    nameBtn.onclick = async () => {
+      state.currentTable = table;
       renderTableList();
       await loadColumns();
       state.page = 1;
       await doQuery();
     };
-    els.tableList.appendChild(btn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn btn-danger table-delete";
+    deleteBtn.textContent = "删";
+    deleteBtn.title = `删除数据表 ${table}`;
+    deleteBtn.onclick = async (e) => {
+      e.stopPropagation();
+      await doDeleteTable(table);
+    };
+
+    row.appendChild(nameBtn);
+    row.appendChild(deleteBtn);
+    els.tableList.appendChild(row);
   });
+  refreshCurrentTableTag();
 }
 
 async function loadTables() {
   const data = await fetchJson("/api/tables");
   state.tables = data.tables || [];
 
-  els.tableSelect.innerHTML = "";
-  if (state.tables.length === 0) {
-    els.tableSelect.appendChild(createOption("", "暂无数据表，请先导入 Excel"));
-    renderTableList();
+  if (!state.tables.length) {
+    state.currentTable = "";
     state.columns = [];
     refreshFieldSelectors();
+    renderTableList();
+    clearTableView("暂无数据，请先导入 Excel");
     return;
   }
 
-  state.tables.forEach((table) => {
-    els.tableSelect.appendChild(createOption(table, table));
-  });
+  if (!state.tables.includes(state.currentTable)) {
+    state.currentTable = state.tables[0];
+  }
 
   renderTableList();
   await loadColumns();
 }
 
 async function loadColumns() {
-  const table = els.tableSelect.value;
+  const table = state.currentTable;
   if (!table) {
     state.columns = [];
     refreshFieldSelectors();
@@ -180,7 +210,7 @@ function collectPayload() {
   });
 
   return {
-    table: els.tableSelect.value,
+    table: state.currentTable,
     page: state.page,
     page_size: Number(els.pageSize.value || 20),
     global_keyword: (els.globalKeyword.value || "").trim(),
@@ -192,7 +222,7 @@ function collectPayload() {
 
 function renderTable(columns, rows) {
   if (!columns || columns.length === 0) {
-    els.resultTable.innerHTML = "<tr><td class='p-3'>暂无数据</td></tr>";
+    clearTableView("暂无数据");
     return;
   }
 
@@ -222,10 +252,31 @@ function escapeHtml(val) {
     .replaceAll("'", "&#39;");
 }
 
+async function doDeleteTable(table) {
+  const ok = window.confirm(`确认删除数据表【${table}】吗？该操作不可恢复。`);
+  if (!ok) return;
+
+  try {
+    await fetchJson(`/api/table/${encodeURIComponent(table)}`, { method: "DELETE" });
+    if (state.currentTable === table) {
+      state.currentTable = "";
+    }
+    setMessage(els.importMsg, `已删除数据表：${table}`);
+    await loadTables();
+    state.page = 1;
+    if (state.currentTable) {
+      await doQuery();
+    }
+  } catch (err) {
+    setMessage(els.importMsg, err.message || "删除失败", true);
+  }
+}
+
 async function doQuery() {
   const payload = collectPayload();
   if (!payload.table) {
-    setMessage(els.queryMsg, "请先导入并选择数据表", true);
+    setMessage(els.queryMsg, "请先在左侧选择数据表", true);
+    clearTableView("请先在左侧选择数据表");
     return;
   }
 
@@ -266,7 +317,9 @@ async function doImport() {
     setMessage(els.importMsg, `导入完成，创建 ${data.count} 张表：${lines.join("；")}`);
     await loadTables();
     state.page = 1;
-    await doQuery();
+    if (state.currentTable) {
+      await doQuery();
+    }
   } catch (err) {
     setMessage(els.importMsg, err.message || "导入失败", true);
   }
@@ -275,7 +328,7 @@ async function doImport() {
 async function doExport() {
   const payload = collectPayload();
   if (!payload.table) {
-    setMessage(els.queryMsg, "请先选择数据表", true);
+    setMessage(els.queryMsg, "请先在左侧选择数据表", true);
     return;
   }
 
@@ -312,12 +365,6 @@ async function doExport() {
 
 function bindEvents() {
   els.importBtn.onclick = doImport;
-  els.tableSelect.onchange = async () => {
-    renderTableList();
-    await loadColumns();
-    state.page = 1;
-    await doQuery();
-  };
   els.addFilterBtn.onclick = () => addFilterRow();
   els.searchBtn.onclick = async () => {
     state.page = 1;
@@ -352,7 +399,9 @@ async function init() {
   bindEvents();
   addFilterRow();
   await loadTables();
-  await doQuery();
+  if (state.currentTable) {
+    await doQuery();
+  }
 }
 
 init();
