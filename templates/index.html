@@ -7,20 +7,29 @@
   <link rel="stylesheet" href="/static/css/tailwind.min.css" />
 </head>
 <body class="bg-slate-50 text-slate-800">
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+
   <div class="app-shell container mx-auto px-4 py-4 max-w-7xl">
     <aside class="sidebar">
-      <section class="card card-hero mb-4">
+      <section class="card hero mb-4">
+        <p class="kicker">LOCAL DATA WORKBENCH</p>
         <h1 class="text-2xl font-bold mb-2">勤博数据查询系统</h1>
-        <p class="text-sm text-slate-600">纯本地运行，导入后即可查询与导出</p>
+        <p class="text-sm text-slate-600">Excel 导入 · 本地查询 · 一键导出</p>
       </section>
 
-      <section class="card card-side mb-4">
-        <h2 class="text-lg font-semibold mb-3">已导入数据表</h2>
-        <div id="tableList" class="table-list">
+      <section class="card side-card">
+        <div class="section-head mb-3">
+          <h2 class="text-lg font-semibold">数据表</h2>
+          <span class="badge">实时</span>
+        </div>
+
+        <div id="tableList" class="table-list mb-3">
           <p class="table-empty">暂无数据表</p>
         </div>
+
         <div class="import-box">
-          <label class="label">导入 Excel</label>
+          <label class="label">导入 Excel 文件</label>
           <input id="excelFile" type="file" accept=".xlsx,.xls" class="input" />
           <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
           <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
@@ -29,8 +38,14 @@
     </aside>
 
     <main class="main-content">
-      <section class="card mb-4">
-        <h2 class="text-lg font-semibold mb-3">查询条件</h2>
+      <section class="card query-card mb-4">
+        <div class="section-head mb-3">
+          <h2 class="text-lg font-semibold">查询条件</h2>
+          <div class="chips">
+            <span class="chip">全局检索</span>
+            <span class="chip">字段组合</span>
+          </div>
+        </div>
 
         <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
           <div>
@@ -39,7 +54,7 @@
           </div>
           <div>
             <label class="label">全局模糊查询</label>
-            <input id="globalKeyword" class="input" placeholder="关键词" />
+            <input id="globalKeyword" class="input" placeholder="输入关键词" />
           </div>
           <div>
             <label class="label">每页条数</label>
@@ -79,8 +94,8 @@
         <p id="queryMsg" class="text-sm mt-2 text-slate-600"></p>
       </section>
 
-      <section class="card">
-        <div class="flex flex-wrap items-center justify-between mb-3">
+      <section class="card result-card">
+        <div class="section-head mb-3">
           <h2 class="text-lg font-semibold">查询结果</h2>
           <div class="flex items-center gap-2">
             <button id="prevBtn" class="btn">上一页</button>
@@ -88,6 +103,7 @@
             <button id="nextBtn" class="btn">下一页</button>
           </div>
         </div>
+
         <div class="table-wrap">
           <table id="resultTable" class="table"></table>
         </div>
