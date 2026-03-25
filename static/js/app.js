@@ -25,10 +25,8 @@ const els = {
   statQueryableCols: document.getElementById("statQueryableCols"),
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
-  singleField: document.getElementById("singleField"),
-  singleKeyword: document.getElementById("singleKeyword"),
-  sortField: document.getElementById("sortField"),
-  sortOrder: document.getElementById("sortOrder"),
+  sortRules: document.getElementById("sortRules"),
+  addSortBtn: document.getElementById("addSortBtn"),
   hiddenColumns: document.getElementById("hiddenColumns"),
   hideSelectedBtn: document.getElementById("hideSelectedBtn"),
   unhideSelectedBtn: document.getElementById("unhideSelectedBtn"),
@@ -75,7 +73,6 @@ function clearTableView(message = "暂无数据") {
 }
 
 function refreshCurrentTableTag() {
-  if (!els.currentTableTag) return;
   els.currentTableTag.textContent = state.currentTable
     ? `当前表：${state.currentTable}`
     : "当前表：未选择";
@@ -98,9 +95,7 @@ function updateFieldToggleButtons() {
 function getHiddenColumns() {
   const table = state.currentTable;
   if (!table) return [];
-  if (!state.hiddenColumnsByTable[table]) {
-    state.hiddenColumnsByTable[table] = [];
-  }
+  if (!state.hiddenColumnsByTable[table]) state.hiddenColumnsByTable[table] = [];
   return state.hiddenColumnsByTable[table];
 }
 
@@ -136,6 +131,39 @@ function refreshHiddenColumnsPanel() {
   refreshStats();
 }
 
+function formatDisplayValue(val) {
+  if (val === null || val === undefined || val === "") return "";
+
+  if (typeof val === "number") {
+    if (Number.isFinite(val) && !Number.isInteger(val)) {
+      return toPercentText(val);
+    }
+    return val;
+  }
+
+  const text = String(val).trim();
+  if (!text) return "";
+
+  if (isFloatString(text)) {
+    const num = Number(text);
+    if (Number.isFinite(num)) {
+      return toPercentText(num);
+    }
+  }
+
+  return val;
+}
+
+function isFloatString(text) {
+  return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
+}
+
+function toPercentText(num) {
+  const scaled = num * 100;
+  const rounded = Number(scaled.toFixed(2));
+  return `${rounded.toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const contentType = res.headers.get("content-type") || "";
@@ -147,9 +175,7 @@ async function fetchJson(url, options = {}) {
     }
     throw new Error(msg);
   }
-  if (contentType.includes("application/json")) {
-    return res.json();
-  }
+  if (contentType.includes("application/json")) return res.json();
   return null;
 }
 
@@ -243,92 +269,203 @@ async function loadColumns() {
   refreshFieldSelectors();
 }
 
-function refreshFieldSelectors() {
+function refreshConditionFieldOptions(row) {
   const queryableColumns = getQueryableColumns();
+  const fieldSelect = row.querySelector(".cond-field");
+  const selected = fieldSelect.value;
+  fieldSelect.innerHTML = "";
+  fieldSelect.appendChild(createOption("", "选择字段"));
+  queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
+  fieldSelect.value = queryableColumns.includes(selected) ? selected : "";
+}
 
-  const oldSingle = els.singleField.value;
-  const oldSort = els.sortField.value;
+function refreshSortFieldOptions(row) {
+  const queryableColumns = getQueryableColumns();
+  const fieldSelect = row.querySelector(".sort-field");
+  const selected = fieldSelect.value;
+  fieldSelect.innerHTML = "";
+  fieldSelect.appendChild(createOption("", "选择字段"));
+  queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
+  fieldSelect.value = queryableColumns.includes(selected) ? selected : "";
+}
 
-  els.singleField.innerHTML = "";
-  els.singleField.appendChild(createOption("", "不使用"));
+function refreshFieldSelectors() {
+  const conditionRows = Array.from(els.filters.querySelectorAll(".condition-row"));
+  conditionRows.forEach((row) => refreshConditionFieldOptions(row));
 
-  els.sortField.innerHTML = "";
-  els.sortField.appendChild(createOption("", "不排序"));
-
-  queryableColumns.forEach((col) => {
-    els.singleField.appendChild(createOption(col, col));
-    els.sortField.appendChild(createOption(col, col));
-  });
-
-  els.singleField.value = queryableColumns.includes(oldSingle) ? oldSingle : "";
-  els.sortField.value = queryableColumns.includes(oldSort) ? oldSort : "";
-
-  const rows = Array.from(els.filters.querySelectorAll(".filter-row"));
-  rows.forEach((row) => {
-    const select = row.querySelector("select");
-    const selected = select.value;
-    select.innerHTML = "";
-    select.appendChild(createOption("", "选择字段"));
-    queryableColumns.forEach((col) => {
-      select.appendChild(createOption(col, col));
-    });
-    select.value = queryableColumns.includes(selected) ? selected : "";
-  });
+  const sortRows = Array.from(els.sortRules.querySelectorAll(".sort-row"));
+  sortRows.forEach((row) => refreshSortFieldOptions(row));
 
   refreshStats();
 }
 
-function addFilterRow(defaultField = "", defaultValue = "") {
-  const queryableColumns = getQueryableColumns();
+function updateConditionInputMode(row) {
+  const type = row.querySelector(".cond-type").value;
+  const likeWrap = row.querySelector(".cond-like-wrap");
+  const rangeWrap = row.querySelector(".cond-range-wrap");
+
+  if (type === "range") {
+    likeWrap.style.display = "none";
+    rangeWrap.style.display = "block";
+  } else {
+    likeWrap.style.display = "block";
+    rangeWrap.style.display = "none";
+  }
+}
+
+function addConditionRow(defaultData = null) {
+  const data = defaultData || { logic: "AND", field: "", type: "like", value: "", min: "", max: "" };
 
   const row = document.createElement("div");
-  row.className = "filter-row grid grid-cols-1 md-grid-cols-3 gap-2";
+  row.className = "condition-row";
+  row.innerHTML = `
+    <div class="cond-logic-wrap">
+      <label class="label">连接</label>
+      <select class="input cond-logic">
+        <option value="AND">AND</option>
+        <option value="OR">OR</option>
+      </select>
+    </div>
+    <div>
+      <label class="label">字段</label>
+      <select class="input cond-field"></select>
+    </div>
+    <div>
+      <label class="label">类型</label>
+      <select class="input cond-type">
+        <option value="like">模糊</option>
+        <option value="range">范围</option>
+      </select>
+    </div>
+    <div class="cond-like-wrap">
+      <label class="label">关键词</label>
+      <input class="input cond-value" placeholder="输入关键词" />
+    </div>
+    <div class="cond-range-wrap">
+      <label class="label">范围（最小/最大）</label>
+      <div class="cond-range-grid">
+        <input class="input cond-min" placeholder="最小值" />
+        <input class="input cond-max" placeholder="最大值" />
+      </div>
+    </div>
+    <div class="cond-action-wrap">
+      <button type="button" class="btn btn-danger cond-remove">删除</button>
+    </div>
+  `;
 
-  const fieldSelect = document.createElement("select");
-  fieldSelect.className = "input";
-  fieldSelect.appendChild(createOption("", "选择字段"));
-  queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
-  fieldSelect.value = queryableColumns.includes(defaultField) ? defaultField : "";
+  refreshConditionFieldOptions(row);
 
-  const valueInput = document.createElement("input");
-  valueInput.className = "input";
-  valueInput.placeholder = "关键词";
-  valueInput.value = defaultValue;
+  row.querySelector(".cond-logic").value = data.logic || "AND";
+  row.querySelector(".cond-field").value = data.field || "";
+  row.querySelector(".cond-type").value = data.type || "like";
+  row.querySelector(".cond-value").value = data.value || "";
+  row.querySelector(".cond-min").value = data.min || "";
+  row.querySelector(".cond-max").value = data.max || "";
 
-  const removeBtn = document.createElement("button");
-  removeBtn.className = "btn btn-danger";
-  removeBtn.type = "button";
-  removeBtn.textContent = "删除";
-  removeBtn.onclick = () => row.remove();
+  row.querySelector(".cond-type").onchange = () => updateConditionInputMode(row);
+  row.querySelector(".cond-remove").onclick = () => {
+    row.remove();
+    updateConditionLogicState();
+  };
 
-  row.appendChild(fieldSelect);
-  row.appendChild(valueInput);
-  row.appendChild(removeBtn);
+  updateConditionInputMode(row);
   els.filters.appendChild(row);
+  updateConditionLogicState();
+}
+
+function updateConditionLogicState() {
+  const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
+  rows.forEach((row, idx) => {
+    const logicWrap = row.querySelector(".cond-logic-wrap");
+    const logic = row.querySelector(".cond-logic");
+    if (idx === 0) {
+      logicWrap.style.visibility = "hidden";
+      logic.disabled = true;
+      logic.value = "AND";
+    } else {
+      logicWrap.style.visibility = "visible";
+      logic.disabled = false;
+    }
+  });
+}
+
+function addSortRow(defaultData = null) {
+  const data = defaultData || { field: "", order: "asc" };
+
+  const row = document.createElement("div");
+  row.className = "sort-row";
+  row.innerHTML = `
+    <div>
+      <label class="label">排序字段</label>
+      <select class="input sort-field"></select>
+    </div>
+    <div>
+      <label class="label">方向</label>
+      <select class="input sort-order">
+        <option value="asc">升序</option>
+        <option value="desc">降序</option>
+      </select>
+    </div>
+    <div class="sort-action-wrap">
+      <button type="button" class="btn btn-danger sort-remove">删除</button>
+    </div>
+  `;
+
+  refreshSortFieldOptions(row);
+  row.querySelector(".sort-field").value = data.field || "";
+  row.querySelector(".sort-order").value = data.order || "asc";
+  row.querySelector(".sort-remove").onclick = () => row.remove();
+
+  els.sortRules.appendChild(row);
+}
+
+function collectConditions() {
+  const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
+  const conditions = [];
+
+  rows.forEach((row, idx) => {
+    const logic = (row.querySelector(".cond-logic").value || "AND").toUpperCase();
+    const field = (row.querySelector(".cond-field").value || "").trim();
+    const type = (row.querySelector(".cond-type").value || "like").trim();
+    const value = (row.querySelector(".cond-value").value || "").trim();
+    const min = (row.querySelector(".cond-min").value || "").trim();
+    const max = (row.querySelector(".cond-max").value || "").trim();
+
+    if (!field) return;
+
+    if (type === "range") {
+      if (!min && !max) return;
+      conditions.push({ logic: idx === 0 ? "AND" : logic, field, type: "range", min, max });
+      return;
+    }
+
+    if (!value) return;
+    conditions.push({ logic: idx === 0 ? "AND" : logic, field, type: "like", value });
+  });
+
+  return conditions;
+}
+
+function collectSortRules() {
+  const rows = Array.from(els.sortRules.querySelectorAll(".sort-row"));
+  const rules = [];
+  rows.forEach((row) => {
+    const field = (row.querySelector(".sort-field").value || "").trim();
+    const order = (row.querySelector(".sort-order").value || "asc").toLowerCase();
+    if (!field) return;
+    rules.push({ field, order: order === "desc" ? "desc" : "asc" });
+  });
+  return rules;
 }
 
 function collectPayload() {
-  const fieldFilters = {};
-  const rows = Array.from(els.filters.querySelectorAll(".filter-row"));
-  rows.forEach((row) => {
-    const [fieldSelect, valueInput] = row.children;
-    const field = fieldSelect.value;
-    const value = (valueInput.value || "").trim();
-    if (field && value) {
-      fieldFilters[field] = value;
-    }
-  });
-
   return {
     table: state.currentTable,
     page: state.page,
     page_size: Number(els.pageSize.value || 20),
     global_keyword: (els.globalKeyword.value || "").trim(),
-    single_field: els.singleField.value,
-    single_keyword: (els.singleKeyword.value || "").trim(),
-    field_filters: fieldFilters,
-    sort_field: els.sortField.value,
-    sort_order: els.sortOrder.value,
+    conditions: collectConditions(),
+    sort_rules: collectSortRules(),
     hidden_columns: getHiddenColumns(),
   };
 }
@@ -338,9 +475,12 @@ function resolveUsedFieldsFromPayload(payload) {
   if (payload.global_keyword) return [...state.lastColumns];
 
   const used = new Set();
-  if (payload.single_field && payload.single_keyword) used.add(payload.single_field);
-  Object.keys(payload.field_filters || {}).forEach((k) => used.add(k));
-  if (payload.sort_field) used.add(payload.sort_field);
+  (payload.conditions || []).forEach((c) => {
+    if (c.field) used.add(c.field);
+  });
+  (payload.sort_rules || []).forEach((s) => {
+    if (s.field) used.add(s.field);
+  });
 
   const usedCols = state.lastColumns.filter((c) => used.has(c));
   return usedCols.length ? usedCols : [...state.lastColumns];
@@ -369,49 +509,15 @@ function renderTable(columns, rows) {
   }
 
   const thead = `<thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
-
   const bodyRows = rows
     .map((row) => {
-      const tds = columns
-        .map((c) => `<td>${escapeHtml(formatDisplayValue(row[c]))}</td>`)
-        .join("");
+      const tds = columns.map((c) => `<td>${escapeHtml(formatDisplayValue(row[c]))}</td>`).join("");
       return `<tr>${tds}</tr>`;
     })
     .join("");
 
   const tbody = `<tbody>${bodyRows || `<tr><td colspan="${columns.length}" class="p-3">无匹配结果</td></tr>`}</tbody>`;
   els.resultTable.innerHTML = `${thead}${tbody}`;
-}
-
-function formatDisplayValue(val) {
-  if (val === null || val === undefined || val === "") return "";
-
-  if (typeof val === "number") {
-    if (Number.isFinite(val) && !Number.isInteger(val)) {
-      return toPercentText(val);
-    }
-    return val;
-  }
-
-  const text = String(val).trim();
-  if (!text) return "";
-
-  if (isFloatString(text)) {
-    const num = Number(text);
-    if (Number.isFinite(num)) {
-      return toPercentText(num);
-    }
-  }
-
-  return val;
-}
-
-function isFloatString(text) {
-  return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
-}
-
-function toPercentText(num) {
-  return `${Math.round(num * 100)}%`;
 }
 
 function escapeHtml(val) {
@@ -507,10 +613,9 @@ async function doExport() {
     return;
   }
 
-  const visibleColumns = state.currentVisibleColumns.length
+  payload.visible_columns = state.currentVisibleColumns.length
     ? [...state.currentVisibleColumns]
     : [...state.lastColumns];
-  payload.visible_columns = visibleColumns;
 
   try {
     const res = await fetch("/api/export", {
@@ -537,15 +642,14 @@ async function doExport() {
     a.download = match?.[1] || "query_result.xlsx";
     a.click();
     URL.revokeObjectURL(url);
-    setMessage(els.queryMsg, `导出成功（${visibleColumns.length} 个字段）`);
+    setMessage(els.queryMsg, `导出成功（${payload.visible_columns.length} 个字段）`);
   } catch (err) {
     setMessage(els.queryMsg, err.message || "导出失败", true);
   }
 }
 
 function bindEnterToQuery() {
-  const directInputs = [els.globalKeyword, els.singleKeyword];
-  directInputs.forEach((el) => {
+  [els.globalKeyword].forEach((el) => {
     el.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
@@ -565,7 +669,8 @@ function bindEnterToQuery() {
 
 function bindEvents() {
   els.importBtn.onclick = doImport;
-  els.addFilterBtn.onclick = () => addFilterRow();
+  els.addFilterBtn.onclick = () => addConditionRow();
+  els.addSortBtn.onclick = () => addSortRow();
 
   els.hideSelectedBtn.onclick = async () => {
     const selected = Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value);
@@ -608,12 +713,10 @@ function bindEvents() {
 
   els.resetBtn.onclick = async () => {
     els.globalKeyword.value = "";
-    els.singleField.value = "";
-    els.singleKeyword.value = "";
-    els.sortField.value = "";
-    els.sortOrder.value = "asc";
     els.filters.innerHTML = "";
-    addFilterRow();
+    els.sortRules.innerHTML = "";
+    addConditionRow();
+    addSortRow();
     state.page = 1;
     await doQuery();
   };
@@ -625,6 +728,7 @@ function bindEvents() {
     updateFieldToggleButtons();
     renderCurrentResult();
   };
+
   els.showUsedFieldsBtn.onclick = () => {
     state.fieldViewMode = "used";
     updateFieldToggleButtons();
@@ -636,6 +740,7 @@ function bindEvents() {
     state.page -= 1;
     await doQuery();
   };
+
   els.nextBtn.onclick = async () => {
     if (state.page >= state.totalPages) return;
     state.page += 1;
@@ -646,14 +751,6 @@ function bindEvents() {
     state.page = 1;
     await doQuery();
   };
-  els.sortField.onchange = async () => {
-    state.page = 1;
-    await doQuery();
-  };
-  els.sortOrder.onchange = async () => {
-    state.page = 1;
-    await doQuery();
-  };
 
   bindEnterToQuery();
 }
@@ -661,11 +758,10 @@ function bindEvents() {
 async function init() {
   bindEvents();
   updateFieldToggleButtons();
-  addFilterRow();
+  addConditionRow();
+  addSortRow();
   await loadTables();
-  if (state.currentTable) {
-    await doQuery();
-  }
+  if (state.currentTable) await doQuery();
 }
 
 init();

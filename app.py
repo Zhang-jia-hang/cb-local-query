@@ -108,49 +108,154 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
     return {"created": created, "count": len(created)}
 
 
-def build_where_clause(
-    columns: list[str],
-    global_keyword: str,
-    single_field: str,
-    single_keyword: str,
-    field_filters: dict[str, str],
-) -> tuple[str, list[str]]:
-    where_parts: list[str] = []
-    params: list[str] = []
-
-    if global_keyword:
-        like = f"%{global_keyword}%"
-        sub_parts = []
-        for col in columns:
-            sub_parts.append(f"CAST({_quote_ident(col)} AS TEXT) LIKE ?")
-            params.append(like)
-        if sub_parts:
-            where_parts.append("(" + " OR ".join(sub_parts) + ")")
-
-    if single_field and single_keyword and single_field in columns:
-        where_parts.append(f"CAST({_quote_ident(single_field)} AS TEXT) LIKE ?")
-        params.append(f"%{single_keyword}%")
-
-    for key, value in field_filters.items():
-        if value and key in columns:
-            where_parts.append(f"CAST({_quote_ident(key)} AS TEXT) LIKE ?")
-            params.append(f"%{value}%")
-
-    if not where_parts:
-        return "", params
-    return " WHERE " + " AND ".join(where_parts), params
-
-
-def build_order_clause(columns: list[str], sort_field: str, sort_order: str) -> str:
-    if sort_field not in columns:
-        return ""
-    direction = "DESC" if (sort_order or "").lower() == "desc" else "ASC"
-    return f" ORDER BY {_quote_ident(sort_field)} {direction}"
-
-
 def apply_hidden_columns(all_columns: list[str], hidden_columns: list[str]) -> list[str]:
     hidden_set = {c for c in hidden_columns if c in all_columns}
     return [c for c in all_columns if c not in hidden_set]
+
+
+def build_global_clause(columns: list[str], global_keyword: str) -> tuple[str, list[Any]]:
+    if not global_keyword:
+        return "", []
+
+    like = f"%{global_keyword}%"
+    parts: list[str] = []
+    params: list[Any] = []
+    for col in columns:
+        parts.append(f"CAST({_quote_ident(col)} AS TEXT) LIKE ?")
+        params.append(like)
+    if not parts:
+        return "", []
+    return "(" + " OR ".join(parts) + ")", params
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def build_conditions_clause(columns: list[str], conditions: list[dict[str, Any]]) -> tuple[str, list[Any]]:
+    if not conditions:
+        return "", []
+
+    expr_parts: list[str] = []
+    params: list[Any] = []
+
+    for cond in conditions:
+        if not isinstance(cond, dict):
+            continue
+
+        field = str(cond.get("field") or "").strip()
+        if field not in columns:
+            continue
+
+        ctype = str(cond.get("type") or "like").strip().lower()
+        expr = ""
+        expr_params: list[Any] = []
+
+        if ctype == "range":
+            min_v = _to_float(cond.get("min"))
+            max_v = _to_float(cond.get("max"))
+            qfield = f"CAST({_quote_ident(field)} AS REAL)"
+            if min_v is not None and max_v is not None:
+                expr = f"({qfield} >= ? AND {qfield} <= ?)"
+                expr_params.extend([min_v, max_v])
+            elif min_v is not None:
+                expr = f"{qfield} >= ?"
+                expr_params.append(min_v)
+            elif max_v is not None:
+                expr = f"{qfield} <= ?"
+                expr_params.append(max_v)
+        else:
+            value = str(cond.get("value") or "").strip()
+            if value:
+                expr = f"CAST({_quote_ident(field)} AS TEXT) LIKE ?"
+                expr_params.append(f"%{value}%")
+
+        if not expr:
+            continue
+
+        logic = str(cond.get("logic") or "AND").upper()
+        if logic not in {"AND", "OR"}:
+            logic = "AND"
+
+        if not expr_parts:
+            expr_parts.append(f"({expr})")
+        else:
+            expr_parts.append(f" {logic} ({expr})")
+        params.extend(expr_params)
+
+    if not expr_parts:
+        return "", []
+    return "".join(expr_parts), params
+
+
+def normalize_sort_rules(
+    columns: list[str],
+    sort_rules: list[dict[str, Any]],
+    fallback_field: str,
+    fallback_order: str,
+) -> list[tuple[str, str]]:
+    rules: list[tuple[str, str]] = []
+
+    for item in sort_rules:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "").strip()
+        if field not in columns:
+            continue
+        order = "DESC" if str(item.get("order") or "asc").lower() == "desc" else "ASC"
+        rules.append((field, order))
+
+    if rules:
+        return rules
+
+    if fallback_field in columns:
+        order = "DESC" if (fallback_order or "").lower() == "desc" else "ASC"
+        return [(fallback_field, order)]
+
+    return []
+
+
+def build_order_clause(
+    columns: list[str],
+    sort_rules: list[dict[str, Any]],
+    fallback_field: str,
+    fallback_order: str,
+) -> str:
+    normalized = normalize_sort_rules(columns, sort_rules, fallback_field, fallback_order)
+    if not normalized:
+        return ""
+    parts = [f"{_quote_ident(field)} {order}" for field, order in normalized]
+    return " ORDER BY " + ", ".join(parts)
+
+
+def build_where_clause(
+    query_columns: list[str],
+    global_keyword: str,
+    conditions: list[dict[str, Any]],
+) -> tuple[str, list[Any]]:
+    global_expr, global_params = build_global_clause(query_columns, global_keyword)
+    cond_expr, cond_params = build_conditions_clause(query_columns, conditions)
+
+    parts: list[str] = []
+    params: list[Any] = []
+    if global_expr:
+        parts.append(global_expr)
+        params.extend(global_params)
+    if cond_expr:
+        parts.append("(" + cond_expr + ")")
+        params.extend(cond_params)
+
+    if not parts:
+        return "", []
+    return " WHERE " + " AND ".join(parts), params
 
 
 def query_table(
@@ -158,9 +263,8 @@ def query_table(
     page: int,
     page_size: int,
     global_keyword: str,
-    single_field: str,
-    single_keyword: str,
-    field_filters: dict[str, str],
+    conditions: list[dict[str, Any]],
+    sort_rules: list[dict[str, Any]],
     sort_field: str,
     sort_order: str,
     hidden_columns: list[str],
@@ -174,10 +278,8 @@ def query_table(
     if not query_columns:
         raise ValueError("all columns are hidden")
 
-    where_clause, params = build_where_clause(
-        query_columns, global_keyword, single_field, single_keyword, field_filters
-    )
-    order_clause = build_order_clause(query_columns, sort_field, sort_order)
+    where_clause, params = build_where_clause(query_columns, global_keyword, conditions)
+    order_clause = build_order_clause(query_columns, sort_rules, sort_field, sort_order)
     select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
     safe_page = max(1, page)
@@ -208,9 +310,8 @@ def query_table(
 def fetch_all_rows_for_export(
     table: str,
     global_keyword: str,
-    single_field: str,
-    single_keyword: str,
-    field_filters: dict[str, str],
+    conditions: list[dict[str, Any]],
+    sort_rules: list[dict[str, Any]],
     sort_field: str,
     sort_order: str,
     hidden_columns: list[str],
@@ -224,10 +325,8 @@ def fetch_all_rows_for_export(
     if not query_columns:
         raise ValueError("all columns are hidden")
 
-    where_clause, params = build_where_clause(
-        query_columns, global_keyword, single_field, single_keyword, field_filters
-    )
-    order_clause = build_order_clause(query_columns, sort_field, sort_order)
+    where_clause, params = build_where_clause(query_columns, global_keyword, conditions)
+    order_clause = build_order_clause(query_columns, sort_rules, sort_field, sort_order)
     select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
     with get_conn() as conn:
@@ -244,12 +343,19 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
     if not isinstance(hidden_columns, list):
         hidden_columns = []
 
+    conditions = payload.get("conditions") or []
+    if not isinstance(conditions, list):
+        conditions = []
+
+    sort_rules = payload.get("sort_rules") or []
+    if not isinstance(sort_rules, list):
+        sort_rules = []
+
     columns, rows = fetch_all_rows_for_export(
         table=table,
         global_keyword=payload.get("global_keyword", "").strip(),
-        single_field=payload.get("single_field", "").strip(),
-        single_keyword=payload.get("single_keyword", "").strip(),
-        field_filters=payload.get("field_filters") or {},
+        conditions=conditions,
+        sort_rules=sort_rules,
         sort_field=payload.get("sort_field", "").strip(),
         sort_order=payload.get("sort_order", "asc").strip(),
         hidden_columns=hidden_columns,
@@ -324,15 +430,22 @@ def create_app() -> Flask:
         if not isinstance(hidden_columns, list):
             hidden_columns = []
 
+        conditions = payload.get("conditions") or []
+        if not isinstance(conditions, list):
+            conditions = []
+
+        sort_rules = payload.get("sort_rules") or []
+        if not isinstance(sort_rules, list):
+            sort_rules = []
+
         try:
             result = query_table(
                 table=table,
                 page=int(payload.get("page", 1)),
                 page_size=int(payload.get("page_size", DEFAULT_PAGE_SIZE)),
                 global_keyword=(payload.get("global_keyword") or "").strip(),
-                single_field=(payload.get("single_field") or "").strip(),
-                single_keyword=(payload.get("single_keyword") or "").strip(),
-                field_filters=payload.get("field_filters") or {},
+                conditions=conditions,
+                sort_rules=sort_rules,
                 sort_field=(payload.get("sort_field") or "").strip(),
                 sort_order=(payload.get("sort_order") or "asc").strip(),
                 hidden_columns=hidden_columns,

@@ -61,51 +61,26 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
-          <div>
-            <label class="label">单字段查询 - 字段</label>
-            <select id="singleField" class="input"></select>
-          </div>
-          <div>
-            <label class="label">单字段查询 - 关键词</label>
-            <input id="singleKeyword" class="input" placeholder="例如：张三" />
-          </div>
-          <div>
-            <label class="label">每页条数</label>
-            <select id="pageSize" class="input">
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
-          <div>
-            <label class="label">字段排序</label>
-            <select id="sortField" class="input"></select>
-          </div>
-          <div>
-            <label class="label">排序方向</label>
-            <select id="sortOrder" class="input">
-              <option value="asc" selected>升序</option>
-              <option value="desc">降序</option>
-            </select>
-          </div>
-        </div>
-
         <div class="mb-3">
           <div class="section-head mb-2">
-            <label class="label">多字段组合查询（AND）</label>
+            <label class="label">多字段查询（支持模糊 / 范围 + AND / OR）</label>
             <button id="addFilterBtn" class="btn btn-secondary">新增条件</button>
           </div>
           <div id="filters" class="space-y-2"></div>
         </div>
 
         <details class="card-lite mb-2" id="advancedPanel">
-          <summary>高级设置：隐藏列管理（隐藏列不参与查询与导出）</summary>
+          <summary>高级设置：多字段排序与隐藏列</summary>
           <div class="advanced-body">
+            <div class="mb-3">
+              <div class="section-head mb-2">
+                <label class="label">排序规则（从上到下优先级）</label>
+                <button id="addSortBtn" class="btn btn-secondary">新增排序</button>
+              </div>
+              <div id="sortRules" class="space-y-2"></div>
+            </div>
+
+            <label class="label">隐藏列管理（隐藏列不参与查询与导出）</label>
             <select id="hiddenColumns" class="input multi-select" multiple></select>
             <div class="flex gap-2 mt-2 flex-wrap">
               <button id="hideSelectedBtn" class="btn">隐藏选中字段</button>
@@ -123,6 +98,14 @@
         <div class="section-head mb-3">
           <h2 class="text-lg font-semibold">查询结果</h2>
           <div class="flex items-center gap-2 flex-wrap">
+            <label class="label-inline">每页条数</label>
+            <select id="pageSize" class="input page-size-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+
             <div class="field-toggle-group">
               <button id="showAllFieldsBtn" class="btn btn-toggle active">显示全部字段</button>
               <button id="showUsedFieldsBtn" class="btn btn-toggle">仅显示本次查询字段</button>
