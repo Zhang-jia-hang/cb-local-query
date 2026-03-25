@@ -11,6 +11,7 @@
   lastColumns: [],
   lastUsedFields: [],
   currentVisibleColumns: [],
+  querying: false,
 };
 
 const els = {
@@ -19,6 +20,9 @@ const els = {
   importMsg: document.getElementById("importMsg"),
   tableList: document.getElementById("tableList"),
   currentTableTag: document.getElementById("currentTableTag"),
+  statTotalCols: document.getElementById("statTotalCols"),
+  statHiddenCols: document.getElementById("statHiddenCols"),
+  statQueryableCols: document.getElementById("statQueryableCols"),
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
   singleField: document.getElementById("singleField"),
@@ -49,6 +53,15 @@ function setMessage(el, text, isError = false) {
   el.className = `text-sm mt-2 ${isError ? "text-red-600" : "text-slate-600"}`;
 }
 
+function setQueryBusy(busy) {
+  state.querying = busy;
+  els.searchBtn.disabled = busy;
+  els.exportBtn.disabled = busy;
+  els.prevBtn.disabled = busy;
+  els.nextBtn.disabled = busy;
+  els.searchBtn.textContent = busy ? "查询中..." : "查询";
+}
+
 function createOption(value, label) {
   const op = document.createElement("option");
   op.value = value;
@@ -66,6 +79,15 @@ function refreshCurrentTableTag() {
   els.currentTableTag.textContent = state.currentTable
     ? `当前表：${state.currentTable}`
     : "当前表：未选择";
+}
+
+function refreshStats() {
+  const total = state.columns.length;
+  const hidden = getHiddenColumns().length;
+  const queryable = getQueryableColumns().length;
+  els.statTotalCols.textContent = `总字段：${total}`;
+  els.statHiddenCols.textContent = `隐藏：${hidden}`;
+  els.statQueryableCols.textContent = `可查询：${queryable}`;
 }
 
 function updateFieldToggleButtons() {
@@ -95,11 +117,10 @@ function getQueryableColumns() {
 }
 
 function refreshHiddenColumnsPanel() {
-  if (!els.hiddenColumns) return;
-
   els.hiddenColumns.innerHTML = "";
   if (!state.columns.length) {
     setMessage(els.hiddenMsg, "当前无可配置字段");
+    refreshStats();
     return;
   }
 
@@ -112,6 +133,7 @@ function refreshHiddenColumnsPanel() {
   });
 
   setMessage(els.hiddenMsg, `已隐藏 ${hidden.size} / ${state.columns.length} 个字段`);
+  refreshStats();
 }
 
 async function fetchJson(url, options = {}) {
@@ -132,7 +154,6 @@ async function fetchJson(url, options = {}) {
 }
 
 function renderTableList() {
-  if (!els.tableList) return;
   els.tableList.innerHTML = "";
 
   if (!state.tables.length) {
@@ -225,6 +246,9 @@ async function loadColumns() {
 function refreshFieldSelectors() {
   const queryableColumns = getQueryableColumns();
 
+  const oldSingle = els.singleField.value;
+  const oldSort = els.sortField.value;
+
   els.singleField.innerHTML = "";
   els.singleField.appendChild(createOption("", "不使用"));
 
@@ -236,12 +260,8 @@ function refreshFieldSelectors() {
     els.sortField.appendChild(createOption(col, col));
   });
 
-  if (els.singleField.value && !queryableColumns.includes(els.singleField.value)) {
-    els.singleField.value = "";
-  }
-  if (els.sortField.value && !queryableColumns.includes(els.sortField.value)) {
-    els.sortField.value = "";
-  }
+  els.singleField.value = queryableColumns.includes(oldSingle) ? oldSingle : "";
+  els.sortField.value = queryableColumns.includes(oldSort) ? oldSort : "";
 
   const rows = Array.from(els.filters.querySelectorAll(".filter-row"));
   rows.forEach((row) => {
@@ -254,6 +274,8 @@ function refreshFieldSelectors() {
     });
     select.value = queryableColumns.includes(selected) ? selected : "";
   });
+
+  refreshStats();
 }
 
 function addFilterRow(defaultField = "", defaultValue = "") {
@@ -266,7 +288,7 @@ function addFilterRow(defaultField = "", defaultValue = "") {
   fieldSelect.className = "input";
   fieldSelect.appendChild(createOption("", "选择字段"));
   queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
-  fieldSelect.value = defaultField;
+  fieldSelect.value = queryableColumns.includes(defaultField) ? defaultField : "";
 
   const valueInput = document.createElement("input");
   valueInput.className = "input";
@@ -316,13 +338,9 @@ function resolveUsedFieldsFromPayload(payload) {
   if (payload.global_keyword) return [...state.lastColumns];
 
   const used = new Set();
-  if (payload.single_field && payload.single_keyword) {
-    used.add(payload.single_field);
-  }
+  if (payload.single_field && payload.single_keyword) used.add(payload.single_field);
   Object.keys(payload.field_filters || {}).forEach((k) => used.add(k));
-  if (payload.sort_field) {
-    used.add(payload.sort_field);
-  }
+  if (payload.sort_field) used.add(payload.sort_field);
 
   const usedCols = state.lastColumns.filter((c) => used.has(c));
   return usedCols.length ? usedCols : [...state.lastColumns];
@@ -330,9 +348,7 @@ function resolveUsedFieldsFromPayload(payload) {
 
 function getVisibleColumns() {
   if (!state.lastColumns.length) return [];
-  if (state.fieldViewMode === "all") {
-    return [...state.lastColumns];
-  }
+  if (state.fieldViewMode === "all") return [...state.lastColumns];
   return state.lastUsedFields.length ? [...state.lastUsedFields] : [...state.lastColumns];
 }
 
@@ -352,15 +368,11 @@ function renderTable(columns, rows) {
     return;
   }
 
-  const thead = `<thead><tr>${columns
-    .map((c) => `<th>${escapeHtml(c)}</th>`)
-    .join("")}</tr></thead>`;
+  const thead = `<thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
 
   const bodyRows = rows
     .map((row) => {
-      const tds = columns
-        .map((c) => `<td>${escapeHtml(row[c] ?? "")}</td>`)
-        .join("");
+      const tds = columns.map((c) => `<td>${escapeHtml(row[c] ?? "")}</td>`).join("");
       return `<tr>${tds}</tr>`;
     })
     .join("");
@@ -385,15 +397,11 @@ async function doDeleteTable(table) {
   try {
     await fetchJson(`/api/table/${encodeURIComponent(table)}`, { method: "DELETE" });
     delete state.hiddenColumnsByTable[table];
-    if (state.currentTable === table) {
-      state.currentTable = "";
-    }
+    if (state.currentTable === table) state.currentTable = "";
     setMessage(els.importMsg, `已删除数据表：${table}`);
     await loadTables();
     state.page = 1;
-    if (state.currentTable) {
-      await doQuery();
-    }
+    if (state.currentTable) await doQuery();
   } catch (err) {
     setMessage(els.importMsg, err.message || "删除失败", true);
   }
@@ -413,6 +421,7 @@ async function doQuery() {
     return;
   }
 
+  setQueryBusy(true);
   try {
     const data = await fetchJson("/api/query", {
       method: "POST",
@@ -432,6 +441,8 @@ async function doQuery() {
     setMessage(els.queryMsg, "查询完成");
   } catch (err) {
     setMessage(els.queryMsg, err.message || "查询失败", true);
+  } finally {
+    setQueryBusy(false);
   }
 }
 
@@ -445,18 +456,12 @@ async function doImport() {
   const form = new FormData();
   form.append("file", file);
   try {
-    const data = await fetchJson("/api/import-excel", {
-      method: "POST",
-      body: form,
-    });
-
+    const data = await fetchJson("/api/import-excel", { method: "POST", body: form });
     const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.table}`);
     setMessage(els.importMsg, `导入完成，创建 ${data.count} 张表：${lines.join("；")}`);
     await loadTables();
     state.page = 1;
-    if (state.currentTable) {
-      await doQuery();
-    }
+    if (state.currentTable) await doQuery();
   } catch (err) {
     setMessage(els.importMsg, err.message || "导入失败", true);
   }
@@ -503,6 +508,26 @@ async function doExport() {
   } catch (err) {
     setMessage(els.queryMsg, err.message || "导出失败", true);
   }
+}
+
+function bindEnterToQuery() {
+  const directInputs = [els.globalKeyword, els.singleKeyword];
+  directInputs.forEach((el) => {
+    el.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      state.page = 1;
+      await doQuery();
+    });
+  });
+
+  els.filters.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    if (!(e.target instanceof HTMLInputElement)) return;
+    e.preventDefault();
+    state.page = 1;
+    await doQuery();
+  });
 }
 
 function bindEvents() {
@@ -555,8 +580,8 @@ function bindEvents() {
     els.sortField.value = "";
     els.sortOrder.value = "asc";
     els.filters.innerHTML = "";
-    state.page = 1;
     addFilterRow();
+    state.page = 1;
     await doQuery();
   };
 
@@ -583,10 +608,21 @@ function bindEvents() {
     state.page += 1;
     await doQuery();
   };
+
   els.pageSize.onchange = async () => {
     state.page = 1;
     await doQuery();
   };
+  els.sortField.onchange = async () => {
+    state.page = 1;
+    await doQuery();
+  };
+  els.sortOrder.onchange = async () => {
+    state.page = 1;
+    await doQuery();
+  };
+
+  bindEnterToQuery();
 }
 
 async function init() {

@@ -15,7 +15,7 @@
       <section class="card hero mb-4">
         <p class="kicker">LOCAL DATA WORKBENCH</p>
         <h1 class="text-2xl font-bold mb-2">勤博数据查询系统</h1>
-        <p class="text-sm text-slate-600">Excel 导入 · 本地查询 · 一键导出</p>
+        <p class="text-sm text-slate-600">导入 Excel，左侧选表，右侧快速查询与导出</p>
       </section>
 
       <section class="card side-card">
@@ -39,18 +39,36 @@
 
     <main class="main-content">
       <section class="card query-card mb-4">
-        <div class="section-head mb-3">
+        <div class="section-head mb-2">
           <h2 class="text-lg font-semibold">查询条件</h2>
           <div class="chips">
             <span class="chip" id="currentTableTag">当前表：未选择</span>
-            <span class="chip">字段组合</span>
+            <span class="chip" id="statTotalCols">总字段：0</span>
+            <span class="chip" id="statHiddenCols">隐藏：0</span>
+            <span class="chip" id="statQueryableCols">可查询：0</span>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
-          <div>
+        <div class="quick-row mb-3">
+          <div class="quick-input">
             <label class="label">全局模糊查询</label>
-            <input id="globalKeyword" class="input" placeholder="输入关键词" />
+            <input id="globalKeyword" class="input" placeholder="输入关键词后回车即可查询" />
+          </div>
+          <div class="quick-actions">
+            <button id="searchBtn" class="btn btn-primary">查询</button>
+            <button id="resetBtn" class="btn">重置</button>
+            <button id="exportBtn" class="btn btn-success">导出当前结果 Excel</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md-grid-cols-3 gap-3 mb-3">
+          <div>
+            <label class="label">单字段查询 - 字段</label>
+            <select id="singleField" class="input"></select>
+          </div>
+          <div>
+            <label class="label">单字段查询 - 关键词</label>
+            <input id="singleKeyword" class="input" placeholder="例如：张三" />
           </div>
           <div>
             <label class="label">每页条数</label>
@@ -60,17 +78,6 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md-grid-cols-2 gap-3 mb-3">
-          <div>
-            <label class="label">单字段模糊查询 - 字段</label>
-            <select id="singleField" class="input"></select>
-          </div>
-          <div>
-            <label class="label">单字段模糊查询 - 关键词</label>
-            <input id="singleKeyword" class="input" placeholder="例如：张三" />
           </div>
         </div>
 
@@ -90,30 +97,25 @@
 
         <div class="mb-3">
           <div class="section-head mb-2">
-            <label class="label">隐藏列管理（查询与导出都会忽略隐藏列）</label>
-          </div>
-          <select id="hiddenColumns" class="input multi-select" multiple></select>
-          <div class="flex gap-2 mt-2 flex-wrap">
-            <button id="hideSelectedBtn" class="btn">隐藏选中字段</button>
-            <button id="unhideSelectedBtn" class="btn">取消隐藏选中</button>
-            <button id="clearHiddenBtn" class="btn">显示全部字段</button>
-          </div>
-          <p id="hiddenMsg" class="text-sm mt-2 text-slate-600"></p>
-        </div>
-
-        <div class="mb-3">
-          <div class="flex items-center justify-between mb-2">
             <label class="label">多字段组合查询（AND）</label>
             <button id="addFilterBtn" class="btn btn-secondary">新增条件</button>
           </div>
           <div id="filters" class="space-y-2"></div>
         </div>
 
-        <div class="flex flex-wrap gap-2">
-          <button id="searchBtn" class="btn btn-primary">查询</button>
-          <button id="resetBtn" class="btn">重置</button>
-          <button id="exportBtn" class="btn btn-success">导出当前结果 Excel</button>
-        </div>
+        <details class="card-lite mb-2" id="advancedPanel">
+          <summary>高级设置：隐藏列管理（隐藏列不参与查询与导出）</summary>
+          <div class="advanced-body">
+            <select id="hiddenColumns" class="input multi-select" multiple></select>
+            <div class="flex gap-2 mt-2 flex-wrap">
+              <button id="hideSelectedBtn" class="btn">隐藏选中字段</button>
+              <button id="unhideSelectedBtn" class="btn">取消隐藏选中</button>
+              <button id="clearHiddenBtn" class="btn">显示全部字段</button>
+            </div>
+            <p id="hiddenMsg" class="text-sm mt-2 text-slate-600"></p>
+          </div>
+        </details>
+
         <p id="queryMsg" class="text-sm mt-2 text-slate-600"></p>
       </section>
 
