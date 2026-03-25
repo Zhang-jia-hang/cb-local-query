@@ -236,6 +236,19 @@ body {
   box-shadow: 0 0 0 4px rgba(59, 130, 246, .12);
 }
 
+.multi-select {
+  min-height: 140px;
+  padding: .4rem;
+}
+.multi-select option {
+  padding: .35rem .45rem;
+  border-radius: 8px;
+}
+.multi-select option:checked {
+  background: #dbeafe linear-gradient(0deg, #dbeafe 0%, #dbeafe 100%);
+  color: #0b4cab;
+}
+
 .btn {
   border: 1px solid #ccd8e8;
   border-radius: 12px;

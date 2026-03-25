@@ -1,6 +1,7 @@
 ﻿const state = {
   tables: [],
   columns: [],
+  hiddenColumnsByTable: {},
   currentTable: "",
   page: 1,
   totalPages: 1,
@@ -24,6 +25,11 @@ const els = {
   singleKeyword: document.getElementById("singleKeyword"),
   sortField: document.getElementById("sortField"),
   sortOrder: document.getElementById("sortOrder"),
+  hiddenColumns: document.getElementById("hiddenColumns"),
+  hideSelectedBtn: document.getElementById("hideSelectedBtn"),
+  unhideSelectedBtn: document.getElementById("unhideSelectedBtn"),
+  clearHiddenBtn: document.getElementById("clearHiddenBtn"),
+  hiddenMsg: document.getElementById("hiddenMsg"),
   addFilterBtn: document.getElementById("addFilterBtn"),
   filters: document.getElementById("filters"),
   searchBtn: document.getElementById("searchBtn"),
@@ -65,6 +71,47 @@ function refreshCurrentTableTag() {
 function updateFieldToggleButtons() {
   els.showAllFieldsBtn.classList.toggle("active", state.fieldViewMode === "all");
   els.showUsedFieldsBtn.classList.toggle("active", state.fieldViewMode === "used");
+}
+
+function getHiddenColumns() {
+  const table = state.currentTable;
+  if (!table) return [];
+  if (!state.hiddenColumnsByTable[table]) {
+    state.hiddenColumnsByTable[table] = [];
+  }
+  return state.hiddenColumnsByTable[table];
+}
+
+function setHiddenColumns(columns) {
+  const table = state.currentTable;
+  if (!table) return;
+  const unique = [...new Set(columns.filter((c) => state.columns.includes(c)))];
+  state.hiddenColumnsByTable[table] = unique;
+}
+
+function getQueryableColumns() {
+  const hidden = new Set(getHiddenColumns());
+  return state.columns.filter((c) => !hidden.has(c));
+}
+
+function refreshHiddenColumnsPanel() {
+  if (!els.hiddenColumns) return;
+
+  els.hiddenColumns.innerHTML = "";
+  if (!state.columns.length) {
+    setMessage(els.hiddenMsg, "当前无可配置字段");
+    return;
+  }
+
+  const hidden = new Set(getHiddenColumns());
+  state.columns.forEach((col) => {
+    const label = hidden.has(col) ? `${col} (已隐藏)` : col;
+    const op = createOption(col, label);
+    op.selected = hidden.has(col);
+    els.hiddenColumns.appendChild(op);
+  });
+
+  setMessage(els.hiddenMsg, `已隐藏 ${hidden.size} / ${state.columns.length} 个字段`);
 }
 
 async function fetchJson(url, options = {}) {
@@ -142,6 +189,7 @@ async function loadTables() {
     state.lastUsedFields = [];
     state.currentVisibleColumns = [];
     refreshFieldSelectors();
+    refreshHiddenColumnsPanel();
     renderTableList();
     clearTableView("暂无数据，请先导入 Excel");
     return;
@@ -160,25 +208,40 @@ async function loadColumns() {
   if (!table) {
     state.columns = [];
     refreshFieldSelectors();
+    refreshHiddenColumnsPanel();
     return;
   }
 
   const data = await fetchJson(`/api/table/${encodeURIComponent(table)}/columns`);
   state.columns = data.columns || [];
+
+  const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
+  setHiddenColumns(stillValidHidden);
+
+  refreshHiddenColumnsPanel();
   refreshFieldSelectors();
 }
 
 function refreshFieldSelectors() {
+  const queryableColumns = getQueryableColumns();
+
   els.singleField.innerHTML = "";
   els.singleField.appendChild(createOption("", "不使用"));
 
   els.sortField.innerHTML = "";
   els.sortField.appendChild(createOption("", "不排序"));
 
-  state.columns.forEach((col) => {
+  queryableColumns.forEach((col) => {
     els.singleField.appendChild(createOption(col, col));
     els.sortField.appendChild(createOption(col, col));
   });
+
+  if (els.singleField.value && !queryableColumns.includes(els.singleField.value)) {
+    els.singleField.value = "";
+  }
+  if (els.sortField.value && !queryableColumns.includes(els.sortField.value)) {
+    els.sortField.value = "";
+  }
 
   const rows = Array.from(els.filters.querySelectorAll(".filter-row"));
   rows.forEach((row) => {
@@ -186,21 +249,23 @@ function refreshFieldSelectors() {
     const selected = select.value;
     select.innerHTML = "";
     select.appendChild(createOption("", "选择字段"));
-    state.columns.forEach((col) => {
+    queryableColumns.forEach((col) => {
       select.appendChild(createOption(col, col));
     });
-    select.value = selected;
+    select.value = queryableColumns.includes(selected) ? selected : "";
   });
 }
 
 function addFilterRow(defaultField = "", defaultValue = "") {
+  const queryableColumns = getQueryableColumns();
+
   const row = document.createElement("div");
   row.className = "filter-row grid grid-cols-1 md-grid-cols-3 gap-2";
 
   const fieldSelect = document.createElement("select");
   fieldSelect.className = "input";
   fieldSelect.appendChild(createOption("", "选择字段"));
-  state.columns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
+  queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
   fieldSelect.value = defaultField;
 
   const valueInput = document.createElement("input");
@@ -242,6 +307,7 @@ function collectPayload() {
     field_filters: fieldFilters,
     sort_field: els.sortField.value,
     sort_order: els.sortOrder.value,
+    hidden_columns: getHiddenColumns(),
   };
 }
 
@@ -318,6 +384,7 @@ async function doDeleteTable(table) {
 
   try {
     await fetchJson(`/api/table/${encodeURIComponent(table)}`, { method: "DELETE" });
+    delete state.hiddenColumnsByTable[table];
     if (state.currentTable === table) {
       state.currentTable = "";
     }
@@ -337,6 +404,12 @@ async function doQuery() {
   if (!payload.table) {
     setMessage(els.queryMsg, "请先在左侧选择数据表", true);
     clearTableView("请先在左侧选择数据表");
+    return;
+  }
+
+  if (!getQueryableColumns().length) {
+    setMessage(els.queryMsg, "当前表字段已全部隐藏，请先恢复至少一个字段", true);
+    clearTableView("当前表字段已全部隐藏");
     return;
   }
 
@@ -435,10 +508,46 @@ async function doExport() {
 function bindEvents() {
   els.importBtn.onclick = doImport;
   els.addFilterBtn.onclick = () => addFilterRow();
+
+  els.hideSelectedBtn.onclick = async () => {
+    const selected = Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value);
+    if (!selected.length) {
+      setMessage(els.hiddenMsg, "请先在字段列表中选中要隐藏的字段", true);
+      return;
+    }
+    setHiddenColumns([...getHiddenColumns(), ...selected]);
+    refreshHiddenColumnsPanel();
+    refreshFieldSelectors();
+    state.page = 1;
+    await doQuery();
+  };
+
+  els.unhideSelectedBtn.onclick = async () => {
+    const selected = new Set(Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value));
+    if (!selected.size) {
+      setMessage(els.hiddenMsg, "请先选中要取消隐藏的字段", true);
+      return;
+    }
+    setHiddenColumns(getHiddenColumns().filter((c) => !selected.has(c)));
+    refreshHiddenColumnsPanel();
+    refreshFieldSelectors();
+    state.page = 1;
+    await doQuery();
+  };
+
+  els.clearHiddenBtn.onclick = async () => {
+    setHiddenColumns([]);
+    refreshHiddenColumnsPanel();
+    refreshFieldSelectors();
+    state.page = 1;
+    await doQuery();
+  };
+
   els.searchBtn.onclick = async () => {
     state.page = 1;
     await doQuery();
   };
+
   els.resetBtn.onclick = async () => {
     els.globalKeyword.value = "";
     els.singleField.value = "";
@@ -450,6 +559,7 @@ function bindEvents() {
     addFilterRow();
     await doQuery();
   };
+
   els.exportBtn.onclick = doExport;
 
   els.showAllFieldsBtn.onclick = () => {

@@ -148,6 +148,11 @@ def build_order_clause(columns: list[str], sort_field: str, sort_order: str) -> 
     return f" ORDER BY {_quote_ident(sort_field)} {direction}"
 
 
+def apply_hidden_columns(all_columns: list[str], hidden_columns: list[str]) -> list[str]:
+    hidden_set = {c for c in hidden_columns if c in all_columns}
+    return [c for c in all_columns if c not in hidden_set]
+
+
 def query_table(
     table: str,
     page: int,
@@ -158,16 +163,22 @@ def query_table(
     field_filters: dict[str, str],
     sort_field: str,
     sort_order: str,
+    hidden_columns: list[str],
 ) -> dict[str, Any]:
     tables = list_tables()
     if table not in tables:
         raise ValueError("table not found")
 
-    columns = get_columns(table)
+    all_columns = get_columns(table)
+    query_columns = apply_hidden_columns(all_columns, hidden_columns)
+    if not query_columns:
+        raise ValueError("all columns are hidden")
+
     where_clause, params = build_where_clause(
-        columns, global_keyword, single_field, single_keyword, field_filters
+        query_columns, global_keyword, single_field, single_keyword, field_filters
     )
-    order_clause = build_order_clause(columns, sort_field, sort_order)
+    order_clause = build_order_clause(query_columns, sort_field, sort_order)
+    select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
     safe_page = max(1, page)
     safe_size = min(MAX_PAGE_SIZE, max(1, page_size))
@@ -178,14 +189,14 @@ def query_table(
             f"SELECT COUNT(1) AS c FROM {_quote_ident(table)}{where_clause}", params
         ).fetchone()["c"]
         rows = conn.execute(
-            f"SELECT * FROM {_quote_ident(table)}{where_clause}{order_clause} LIMIT ? OFFSET ?",
+            f"SELECT {select_clause} FROM {_quote_ident(table)}{where_clause}{order_clause} LIMIT ? OFFSET ?",
             [*params, safe_size, offset],
         ).fetchall()
 
     data = [dict(r) for r in rows]
     total_pages = max(1, (total + safe_size - 1) // safe_size)
     return {
-        "columns": columns,
+        "columns": query_columns,
         "rows": data,
         "total": total,
         "page": safe_page,
@@ -202,27 +213,37 @@ def fetch_all_rows_for_export(
     field_filters: dict[str, str],
     sort_field: str,
     sort_order: str,
+    hidden_columns: list[str],
 ) -> tuple[list[str], list[dict[str, Any]]]:
     tables = list_tables()
     if table not in tables:
         raise ValueError("table not found")
 
-    columns = get_columns(table)
+    all_columns = get_columns(table)
+    query_columns = apply_hidden_columns(all_columns, hidden_columns)
+    if not query_columns:
+        raise ValueError("all columns are hidden")
+
     where_clause, params = build_where_clause(
-        columns, global_keyword, single_field, single_keyword, field_filters
+        query_columns, global_keyword, single_field, single_keyword, field_filters
     )
-    order_clause = build_order_clause(columns, sort_field, sort_order)
+    order_clause = build_order_clause(query_columns, sort_field, sort_order)
+    select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT * FROM {_quote_ident(table)}{where_clause}{order_clause}",
+            f"SELECT {select_clause} FROM {_quote_ident(table)}{where_clause}{order_clause}",
             params,
         ).fetchall()
 
-    return columns, [dict(r) for r in rows]
+    return query_columns, [dict(r) for r in rows]
 
 
 def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, bytes]:
+    hidden_columns = payload.get("hidden_columns") or []
+    if not isinstance(hidden_columns, list):
+        hidden_columns = []
+
     columns, rows = fetch_all_rows_for_export(
         table=table,
         global_keyword=payload.get("global_keyword", "").strip(),
@@ -231,6 +252,7 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
         field_filters=payload.get("field_filters") or {},
         sort_field=payload.get("sort_field", "").strip(),
         sort_order=payload.get("sort_order", "asc").strip(),
+        hidden_columns=hidden_columns,
     )
 
     visible_columns = payload.get("visible_columns") or []
@@ -298,6 +320,10 @@ def create_app() -> Flask:
         if not table:
             return jsonify({"error": "missing table"}), 400
 
+        hidden_columns = payload.get("hidden_columns") or []
+        if not isinstance(hidden_columns, list):
+            hidden_columns = []
+
         try:
             result = query_table(
                 table=table,
@@ -309,6 +335,7 @@ def create_app() -> Flask:
                 field_filters=payload.get("field_filters") or {},
                 sort_field=(payload.get("sort_field") or "").strip(),
                 sort_order=(payload.get("sort_order") or "asc").strip(),
+                hidden_columns=hidden_columns,
             )
             return jsonify(result)
         except ValueError as ex:

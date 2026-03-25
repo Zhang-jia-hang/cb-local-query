@@ -89,6 +89,19 @@
         </div>
 
         <div class="mb-3">
+          <div class="section-head mb-2">
+            <label class="label">隐藏列管理（查询与导出都会忽略隐藏列）</label>
+          </div>
+          <select id="hiddenColumns" class="input multi-select" multiple></select>
+          <div class="flex gap-2 mt-2 flex-wrap">
+            <button id="hideSelectedBtn" class="btn">隐藏选中字段</button>
+            <button id="unhideSelectedBtn" class="btn">取消隐藏选中</button>
+            <button id="clearHiddenBtn" class="btn">显示全部字段</button>
+          </div>
+          <p id="hiddenMsg" class="text-sm mt-2 text-slate-600"></p>
+        </div>
+
+        <div class="mb-3">
           <div class="flex items-center justify-between mb-2">
             <label class="label">多字段组合查询（AND）</label>
             <button id="addFilterBtn" class="btn btn-secondary">新增条件</button>
