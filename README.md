@@ -34,10 +34,33 @@
 1. 执行：`run_dev.bat`
 2. 浏览器自动打开 `http://127.0.0.1:5000`
 
-## 打包 EXE
+## 打包 EXE（一键）
 1. 执行：`build_exe.bat`
 2. 生成文件：`dist\LocalQueryTool.exe`
 3. 双击 EXE 后会自动启动本地服务并打开浏览器。
+
+## 手动打包 EXE（命令行）
+### 1) 准备 Python
+建议使用 Python 3.12。可先检查：
+```powershell
+py -3.12 --version
+```
+
+### 2) 创建独立虚拟环境并安装依赖
+在项目根目录执行：
+```powershell
+py -3.12 -m venv .venv312
+.\.venv312\Scripts\python.exe -m pip install --upgrade pip
+.\.venv312\Scripts\pip.exe install --only-binary=:all: -r requirements.txt
+```
+
+### 3) 执行 PyInstaller 打包
+```powershell
+.\.venv312\Scripts\pyinstaller.exe --noconfirm --clean --onefile --name LocalQueryTool --add-data "templates;templates" --add-data "static;static" start_tool.py
+```
+
+### 4) 查看产物
+- EXE 路径：`dist\LocalQueryTool.exe`
 
 ## 使用说明
 1. 在“导入 Excel”区域选择 Excel 文件并导入。
@@ -49,3 +72,4 @@
 - 表名、字段名会做安全规范化（去除非法字符并避免重复）。
 - 导入同名工作表时会自动追加后缀避免冲突。
 - 数据库存放在 `data/app.db`。
+- 如果旧虚拟环境异常，可删除后重建，或直接新建如 `.venv312` 这样的独立环境。

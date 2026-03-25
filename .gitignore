@@ -3,6 +3,8 @@
 
 # Python env and build outputs
 /.venv/
+/.venv312/
+/.wheeltest/
 /__pycache__/
 /*.spec
 /build/
