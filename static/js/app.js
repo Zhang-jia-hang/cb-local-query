@@ -372,13 +372,46 @@ function renderTable(columns, rows) {
 
   const bodyRows = rows
     .map((row) => {
-      const tds = columns.map((c) => `<td>${escapeHtml(row[c] ?? "")}</td>`).join("");
+      const tds = columns
+        .map((c) => `<td>${escapeHtml(formatDisplayValue(row[c]))}</td>`)
+        .join("");
       return `<tr>${tds}</tr>`;
     })
     .join("");
 
   const tbody = `<tbody>${bodyRows || `<tr><td colspan="${columns.length}" class="p-3">无匹配结果</td></tr>`}</tbody>`;
   els.resultTable.innerHTML = `${thead}${tbody}`;
+}
+
+function formatDisplayValue(val) {
+  if (val === null || val === undefined || val === "") return "";
+
+  if (typeof val === "number") {
+    if (Number.isFinite(val) && !Number.isInteger(val)) {
+      return toPercentText(val);
+    }
+    return val;
+  }
+
+  const text = String(val).trim();
+  if (!text) return "";
+
+  if (isFloatString(text)) {
+    const num = Number(text);
+    if (Number.isFinite(num)) {
+      return toPercentText(num);
+    }
+  }
+
+  return val;
+}
+
+function isFloatString(text) {
+  return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
+}
+
+function toPercentText(num) {
+  return `${Math.round(num * 100)}%`;
 }
 
 function escapeHtml(val) {
