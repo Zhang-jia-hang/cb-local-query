@@ -1,16 +1,15 @@
 ﻿const state = {
   tables: [],
+  recycleBin: [],
+  folders: [],
   columns: [],
   hiddenColumnsByTable: {},
   currentTable: "",
   page: 1,
   totalPages: 1,
   total: 0,
-  fieldViewMode: "all",
   lastRows: [],
   lastColumns: [],
-  lastUsedFields: [],
-  currentVisibleColumns: [],
   querying: false,
 };
 
@@ -19,26 +18,36 @@ const els = {
   importBtn: document.getElementById("importBtn"),
   importMsg: document.getElementById("importMsg"),
   tableList: document.getElementById("tableList"),
+  recycleList: document.getElementById("recycleList"),
+  tableCountBadge: document.getElementById("tableCountBadge"),
+  newFolderPath: document.getElementById("newFolderPath"),
+  createFolderBtn: document.getElementById("createFolderBtn"),
+
   currentTableTag: document.getElementById("currentTableTag"),
+  currentFolderTag: document.getElementById("currentFolderTag"),
   statTotalCols: document.getElementById("statTotalCols"),
   statHiddenCols: document.getElementById("statHiddenCols"),
   statQueryableCols: document.getElementById("statQueryableCols"),
+
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
+
   sortRules: document.getElementById("sortRules"),
   addSortBtn: document.getElementById("addSortBtn"),
+
   hiddenColumns: document.getElementById("hiddenColumns"),
   hideSelectedBtn: document.getElementById("hideSelectedBtn"),
   unhideSelectedBtn: document.getElementById("unhideSelectedBtn"),
   clearHiddenBtn: document.getElementById("clearHiddenBtn"),
   hiddenMsg: document.getElementById("hiddenMsg"),
+
   addFilterBtn: document.getElementById("addFilterBtn"),
   filters: document.getElementById("filters"),
+
   searchBtn: document.getElementById("searchBtn"),
   resetBtn: document.getElementById("resetBtn"),
   exportBtn: document.getElementById("exportBtn"),
-  showAllFieldsBtn: document.getElementById("showAllFieldsBtn"),
-  showUsedFieldsBtn: document.getElementById("showUsedFieldsBtn"),
+
   queryMsg: document.getElementById("queryMsg"),
   resultTable: document.getElementById("resultTable"),
   prevBtn: document.getElementById("prevBtn"),
@@ -72,24 +81,14 @@ function clearTableView(message = "暂无数据") {
   els.pageInfo.textContent = "";
 }
 
-function refreshCurrentTableTag() {
-  els.currentTableTag.textContent = state.currentTable
-    ? `当前表：${state.currentTable}`
-    : "当前表：未选择";
+function currentTableMeta() {
+  return state.tables.find((t) => t.table_name === state.currentTable) || null;
 }
 
-function refreshStats() {
-  const total = state.columns.length;
-  const hidden = getHiddenColumns().length;
-  const queryable = getQueryableColumns().length;
-  els.statTotalCols.textContent = `总字段：${total}`;
-  els.statHiddenCols.textContent = `隐藏：${hidden}`;
-  els.statQueryableCols.textContent = `可查询：${queryable}`;
-}
-
-function updateFieldToggleButtons() {
-  els.showAllFieldsBtn.classList.toggle("active", state.fieldViewMode === "all");
-  els.showUsedFieldsBtn.classList.toggle("active", state.fieldViewMode === "used");
+function refreshHeaderTags() {
+  const meta = currentTableMeta();
+  els.currentTableTag.textContent = meta ? `当前表：${meta.display_name}` : "当前表：未选择";
+  els.currentFolderTag.textContent = meta ? `文件夹：${meta.folder_path || "未分组"}` : "文件夹：-";
 }
 
 function getHiddenColumns() {
@@ -111,6 +110,313 @@ function getQueryableColumns() {
   return state.columns.filter((c) => !hidden.has(c));
 }
 
+function refreshStats() {
+  const total = state.columns.length;
+  const hidden = getHiddenColumns().length;
+  const queryable = getQueryableColumns().length;
+  els.statTotalCols.textContent = `总字段：${total}`;
+  els.statHiddenCols.textContent = `隐藏：${hidden}`;
+  els.statQueryableCols.textContent = `可查询：${queryable}`;
+}
+
+function escapeHtml(val) {
+  return String(val)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function isFloatString(text) {
+  return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
+}
+
+function toPercentText(num) {
+  const scaled = num * 100;
+  const rounded = Number(scaled.toFixed(2));
+  return `${rounded.toFixed(2).replace(/\.?0+$/, "")}%`;
+}
+
+function formatDisplayValue(val) {
+  if (val === null || val === undefined || val === "") return "";
+  if (typeof val === "number") {
+    if (Number.isFinite(val) && !Number.isInteger(val)) return toPercentText(val);
+    return val;
+  }
+
+  const text = String(val).trim();
+  if (!text) return "";
+  if (isFloatString(text)) {
+    const num = Number(text);
+    if (Number.isFinite(num)) return toPercentText(num);
+  }
+  return val;
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok) {
+    let msg = `请求失败(${res.status})`;
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      msg = data.error || msg;
+    }
+    throw new Error(msg);
+  }
+  if (contentType.includes("application/json")) return res.json();
+  return null;
+}
+
+async function loadTableData() {
+  const [tableData, recycleData] = await Promise.all([
+    fetchJson("/api/tables"),
+    fetchJson("/api/recycle-bin"),
+  ]);
+
+  state.tables = tableData.tables || [];
+  state.folders = tableData.folders || [];
+  state.recycleBin = recycleData.tables || [];
+
+  if (!state.tables.find((t) => t.table_name === state.currentTable)) {
+    state.currentTable = state.tables[0]?.table_name || "";
+  }
+
+  renderTableManager();
+}
+
+function renderTableManager() {
+  els.tableCountBadge.textContent = String(state.tables.length);
+
+  const groupMap = new Map();
+  const root = "";
+  groupMap.set(root, []);
+
+  state.folders.forEach((f) => {
+    if (!groupMap.has(f)) groupMap.set(f, []);
+  });
+  state.tables.forEach((t) => {
+    const folder = t.folder_path || "";
+    if (!groupMap.has(folder)) groupMap.set(folder, []);
+    groupMap.get(folder).push(t);
+  });
+
+  const folders = Array.from(groupMap.keys()).sort((a, b) => {
+    if (a === "") return -1;
+    if (b === "") return 1;
+    return a.localeCompare(b, "zh-CN");
+  });
+
+  els.tableList.innerHTML = "";
+  if (!state.tables.length && folders.length <= 1) {
+    els.tableList.innerHTML = "<p class='table-empty'>暂无数据表</p>";
+  } else {
+    folders.forEach((folder) => {
+      const tables = groupMap.get(folder) || [];
+
+      const group = document.createElement("div");
+      group.className = "folder-group";
+
+      const title = document.createElement("div");
+      title.className = "folder-title";
+      title.textContent = folder || "未分组";
+      group.appendChild(title);
+
+      if (!tables.length) {
+        const empty = document.createElement("div");
+        empty.className = "folder-empty";
+        empty.textContent = "(空文件夹)";
+        group.appendChild(empty);
+      } else {
+        tables
+          .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
+          .forEach((t) => group.appendChild(renderTableRow(t)));
+      }
+
+      els.tableList.appendChild(group);
+    });
+  }
+
+  renderRecycleBin();
+  refreshHeaderTags();
+}
+
+function renderTableRow(table) {
+  const row = document.createElement("div");
+  row.className = "table-manage-row";
+
+  const selectBtn = document.createElement("button");
+  selectBtn.type = "button";
+  selectBtn.className = `table-item${state.currentTable === table.table_name ? " active" : ""}`;
+  selectBtn.textContent = table.display_name;
+  selectBtn.title = `${table.display_name} [${table.table_name}]`;
+  selectBtn.onclick = async () => {
+    state.currentTable = table.table_name;
+    state.page = 1;
+    renderTableManager();
+    await loadColumns();
+    await doQuery();
+  };
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "btn btn-mini";
+  renameBtn.textContent = "重命名";
+  renameBtn.onclick = async () => {
+    const name = window.prompt("请输入新表名（显示名）", table.display_name || "");
+    if (name === null) return;
+    if (!name.trim()) return;
+    try {
+      await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/rename`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: name.trim() }),
+      });
+      await loadTableData();
+      setMessage(els.importMsg, "重命名成功");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "重命名失败", true);
+    }
+  };
+
+  const moveBtn = document.createElement("button");
+  moveBtn.type = "button";
+  moveBtn.className = "btn btn-mini";
+  moveBtn.textContent = "移动";
+  moveBtn.onclick = async () => {
+    const folder = window.prompt("输入目标文件夹路径（多级用 /，留空移动到未分组）", table.folder_path || "");
+    if (folder === null) return;
+    try {
+      await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/move`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_path: folder }),
+      });
+      await loadTableData();
+      setMessage(els.importMsg, "移动成功");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "移动失败", true);
+    }
+  };
+
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "btn btn-danger btn-mini";
+  delBtn.textContent = "删除";
+  delBtn.onclick = async () => {
+    const ok = window.confirm(`确认删除【${table.display_name}】到回收站吗？`);
+    if (!ok) return;
+    try {
+      await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/delete`, { method: "POST" });
+      if (state.currentTable === table.table_name) {
+        state.currentTable = "";
+      }
+      await loadTableData();
+      await loadColumns();
+      state.page = 1;
+      if (state.currentTable) {
+        await doQuery();
+      } else {
+        clearTableView("请先选择数据表");
+      }
+      setMessage(els.importMsg, "已移入回收站");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "删除失败", true);
+    }
+  };
+
+  actions.appendChild(renameBtn);
+  actions.appendChild(moveBtn);
+  actions.appendChild(delBtn);
+
+  row.appendChild(selectBtn);
+  row.appendChild(actions);
+  return row;
+}
+
+function renderRecycleBin() {
+  els.recycleList.innerHTML = "";
+  if (!state.recycleBin.length) {
+    els.recycleList.innerHTML = "<p class='table-empty'>回收站为空</p>";
+    return;
+  }
+
+  state.recycleBin.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "recycle-row";
+
+    const txt = document.createElement("div");
+    txt.className = "recycle-name";
+    txt.textContent = `${t.display_name} (${t.folder_path || "未分组"})`;
+
+    const acts = document.createElement("div");
+    acts.className = "row-actions";
+
+    const restore = document.createElement("button");
+    restore.className = "btn btn-mini";
+    restore.textContent = "恢复";
+    restore.onclick = async () => {
+      try {
+        await fetchJson(`/api/table/${encodeURIComponent(t.table_name)}/restore`, { method: "POST" });
+        await loadTableData();
+        setMessage(els.importMsg, "恢复成功");
+      } catch (err) {
+        setMessage(els.importMsg, err.message || "恢复失败", true);
+      }
+    };
+
+    const purge = document.createElement("button");
+    purge.className = "btn btn-danger btn-mini";
+    purge.textContent = "彻底删除";
+    purge.onclick = async () => {
+      const ok = window.confirm(`确认彻底删除【${t.display_name}】吗？该操作不可恢复。`);
+      if (!ok) return;
+      try {
+        await fetchJson(`/api/table/${encodeURIComponent(t.table_name)}/purge`, { method: "DELETE" });
+        await loadTableData();
+        setMessage(els.importMsg, "已彻底删除");
+      } catch (err) {
+        setMessage(els.importMsg, err.message || "彻底删除失败", true);
+      }
+    };
+
+    acts.appendChild(restore);
+    acts.appendChild(purge);
+
+    row.appendChild(txt);
+    row.appendChild(acts);
+    els.recycleList.appendChild(row);
+  });
+}
+
+async function loadColumns() {
+  if (!state.currentTable) {
+    state.columns = [];
+    refreshFieldSelectors();
+    refreshHiddenColumnsPanel();
+    refreshHeaderTags();
+    return;
+  }
+
+  try {
+    const data = await fetchJson(`/api/table/${encodeURIComponent(state.currentTable)}/columns`);
+    state.columns = data.columns || [];
+  } catch {
+    state.columns = [];
+  }
+
+  const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
+  setHiddenColumns(stillValidHidden);
+
+  refreshHeaderTags();
+  refreshHiddenColumnsPanel();
+  refreshFieldSelectors();
+}
+
 function refreshHiddenColumnsPanel() {
   els.hiddenColumns.innerHTML = "";
   if (!state.columns.length) {
@@ -129,144 +435,6 @@ function refreshHiddenColumnsPanel() {
 
   setMessage(els.hiddenMsg, `已隐藏 ${hidden.size} / ${state.columns.length} 个字段`);
   refreshStats();
-}
-
-function formatDisplayValue(val) {
-  if (val === null || val === undefined || val === "") return "";
-
-  if (typeof val === "number") {
-    if (Number.isFinite(val) && !Number.isInteger(val)) {
-      return toPercentText(val);
-    }
-    return val;
-  }
-
-  const text = String(val).trim();
-  if (!text) return "";
-
-  if (isFloatString(text)) {
-    const num = Number(text);
-    if (Number.isFinite(num)) {
-      return toPercentText(num);
-    }
-  }
-
-  return val;
-}
-
-function isFloatString(text) {
-  return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
-}
-
-function toPercentText(num) {
-  const scaled = num * 100;
-  const rounded = Number(scaled.toFixed(2));
-  return `${rounded.toFixed(2).replace(/\.?0+$/, "")}%`;
-}
-
-async function fetchJson(url, options = {}) {
-  const res = await fetch(url, options);
-  const contentType = res.headers.get("content-type") || "";
-  if (!res.ok) {
-    let msg = `请求失败(${res.status})`;
-    if (contentType.includes("application/json")) {
-      const data = await res.json();
-      msg = data.error || msg;
-    }
-    throw new Error(msg);
-  }
-  if (contentType.includes("application/json")) return res.json();
-  return null;
-}
-
-function renderTableList() {
-  els.tableList.innerHTML = "";
-
-  if (!state.tables.length) {
-    const p = document.createElement("p");
-    p.className = "table-empty";
-    p.textContent = "暂无数据表";
-    els.tableList.appendChild(p);
-    refreshCurrentTableTag();
-    return;
-  }
-
-  state.tables.forEach((table) => {
-    const row = document.createElement("div");
-    row.className = "table-row";
-
-    const nameBtn = document.createElement("button");
-    nameBtn.type = "button";
-    nameBtn.className = `table-item${state.currentTable === table ? " active" : ""}`;
-    nameBtn.textContent = table;
-    nameBtn.onclick = async () => {
-      state.currentTable = table;
-      state.page = 1;
-      renderTableList();
-      await loadColumns();
-      await doQuery();
-    };
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "btn btn-danger table-delete";
-    deleteBtn.textContent = "删";
-    deleteBtn.title = `删除数据表 ${table}`;
-    deleteBtn.onclick = async (e) => {
-      e.stopPropagation();
-      await doDeleteTable(table);
-    };
-
-    row.appendChild(nameBtn);
-    row.appendChild(deleteBtn);
-    els.tableList.appendChild(row);
-  });
-  refreshCurrentTableTag();
-}
-
-async function loadTables() {
-  const data = await fetchJson("/api/tables");
-  state.tables = data.tables || [];
-
-  if (!state.tables.length) {
-    state.currentTable = "";
-    state.columns = [];
-    state.lastColumns = [];
-    state.lastRows = [];
-    state.lastUsedFields = [];
-    state.currentVisibleColumns = [];
-    refreshFieldSelectors();
-    refreshHiddenColumnsPanel();
-    renderTableList();
-    clearTableView("暂无数据，请先导入 Excel");
-    return;
-  }
-
-  if (!state.tables.includes(state.currentTable)) {
-    state.currentTable = state.tables[0];
-  }
-
-  renderTableList();
-  await loadColumns();
-}
-
-async function loadColumns() {
-  const table = state.currentTable;
-  if (!table) {
-    state.columns = [];
-    refreshFieldSelectors();
-    refreshHiddenColumnsPanel();
-    return;
-  }
-
-  const data = await fetchJson(`/api/table/${encodeURIComponent(table)}/columns`);
-  state.columns = data.columns || [];
-
-  const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
-  setHiddenColumns(stillValidHidden);
-
-  refreshHiddenColumnsPanel();
-  refreshFieldSelectors();
 }
 
 function refreshConditionFieldOptions(row) {
@@ -290,12 +458,12 @@ function refreshSortFieldOptions(row) {
 }
 
 function refreshFieldSelectors() {
-  const conditionRows = Array.from(els.filters.querySelectorAll(".condition-row"));
-  conditionRows.forEach((row) => refreshConditionFieldOptions(row));
-
-  const sortRows = Array.from(els.sortRules.querySelectorAll(".sort-row"));
-  sortRows.forEach((row) => refreshSortFieldOptions(row));
-
+  Array.from(els.filters.querySelectorAll(".condition-row")).forEach((row) => {
+    refreshConditionFieldOptions(row);
+  });
+  Array.from(els.sortRules.querySelectorAll(".sort-row")).forEach((row) => {
+    refreshSortFieldOptions(row);
+  });
   refreshStats();
 }
 
@@ -303,7 +471,6 @@ function updateConditionInputMode(row) {
   const type = row.querySelector(".cond-type").value;
   const likeWrap = row.querySelector(".cond-like-wrap");
   const rangeWrap = row.querySelector(".cond-range-wrap");
-
   if (type === "range") {
     likeWrap.style.display = "none";
     rangeWrap.style.display = "block";
@@ -313,9 +480,24 @@ function updateConditionInputMode(row) {
   }
 }
 
+function updateConditionLogicState() {
+  const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
+  rows.forEach((row, idx) => {
+    const logicWrap = row.querySelector(".cond-logic-wrap");
+    const logic = row.querySelector(".cond-logic");
+    if (idx === 0) {
+      logicWrap.style.visibility = "hidden";
+      logic.disabled = true;
+      logic.value = "AND";
+    } else {
+      logicWrap.style.visibility = "visible";
+      logic.disabled = false;
+    }
+  });
+}
+
 function addConditionRow(defaultData = null) {
   const data = defaultData || { logic: "AND", field: "", type: "like", value: "", min: "", max: "" };
-
   const row = document.createElement("div");
   row.className = "condition-row";
   row.innerHTML = `
@@ -354,7 +536,6 @@ function addConditionRow(defaultData = null) {
   `;
 
   refreshConditionFieldOptions(row);
-
   row.querySelector(".cond-logic").value = data.logic || "AND";
   row.querySelector(".cond-field").value = data.field || "";
   row.querySelector(".cond-type").value = data.type || "like";
@@ -373,25 +554,8 @@ function addConditionRow(defaultData = null) {
   updateConditionLogicState();
 }
 
-function updateConditionLogicState() {
-  const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
-  rows.forEach((row, idx) => {
-    const logicWrap = row.querySelector(".cond-logic-wrap");
-    const logic = row.querySelector(".cond-logic");
-    if (idx === 0) {
-      logicWrap.style.visibility = "hidden";
-      logic.disabled = true;
-      logic.value = "AND";
-    } else {
-      logicWrap.style.visibility = "visible";
-      logic.disabled = false;
-    }
-  });
-}
-
 function addSortRow(defaultData = null) {
   const data = defaultData || { field: "", order: "asc" };
-
   const row = document.createElement("div");
   row.className = "sort-row";
   row.innerHTML = `
@@ -415,7 +579,6 @@ function addSortRow(defaultData = null) {
   row.querySelector(".sort-field").value = data.field || "";
   row.querySelector(".sort-order").value = data.order || "asc";
   row.querySelector(".sort-remove").onclick = () => row.remove();
-
   els.sortRules.appendChild(row);
 }
 
@@ -436,11 +599,10 @@ function collectConditions() {
     if (type === "range") {
       if (!min && !max) return;
       conditions.push({ logic: idx === 0 ? "AND" : logic, field, type: "range", min, max });
-      return;
+    } else {
+      if (!value) return;
+      conditions.push({ logic: idx === 0 ? "AND" : logic, field, type: "like", value });
     }
-
-    if (!value) return;
-    conditions.push({ logic: idx === 0 ? "AND" : logic, field, type: "like", value });
   });
 
   return conditions;
@@ -470,38 +632,6 @@ function collectPayload() {
   };
 }
 
-function resolveUsedFieldsFromPayload(payload) {
-  if (!payload) return [];
-  if (payload.global_keyword) return [...state.lastColumns];
-
-  const used = new Set();
-  (payload.conditions || []).forEach((c) => {
-    if (c.field) used.add(c.field);
-  });
-  (payload.sort_rules || []).forEach((s) => {
-    if (s.field) used.add(s.field);
-  });
-
-  const usedCols = state.lastColumns.filter((c) => used.has(c));
-  return usedCols.length ? usedCols : [...state.lastColumns];
-}
-
-function getVisibleColumns() {
-  if (!state.lastColumns.length) return [];
-  if (state.fieldViewMode === "all") return [...state.lastColumns];
-  return state.lastUsedFields.length ? [...state.lastUsedFields] : [...state.lastColumns];
-}
-
-function renderCurrentResult() {
-  if (!state.lastColumns.length) {
-    clearTableView("暂无数据");
-    return;
-  }
-  const visibleColumns = getVisibleColumns();
-  state.currentVisibleColumns = visibleColumns;
-  renderTable(visibleColumns, state.lastRows);
-}
-
 function renderTable(columns, rows) {
   if (!columns || columns.length === 0) {
     clearTableView("暂无可见字段");
@@ -518,32 +648,6 @@ function renderTable(columns, rows) {
 
   const tbody = `<tbody>${bodyRows || `<tr><td colspan="${columns.length}" class="p-3">无匹配结果</td></tr>`}</tbody>`;
   els.resultTable.innerHTML = `${thead}${tbody}`;
-}
-
-function escapeHtml(val) {
-  return String(val)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-async function doDeleteTable(table) {
-  const ok = window.confirm(`确认删除数据表【${table}】吗？该操作不可恢复。`);
-  if (!ok) return;
-
-  try {
-    await fetchJson(`/api/table/${encodeURIComponent(table)}`, { method: "DELETE" });
-    delete state.hiddenColumnsByTable[table];
-    if (state.currentTable === table) state.currentTable = "";
-    setMessage(els.importMsg, `已删除数据表：${table}`);
-    await loadTables();
-    state.page = 1;
-    if (state.currentTable) await doQuery();
-  } catch (err) {
-    setMessage(els.importMsg, err.message || "删除失败", true);
-  }
 }
 
 async function doQuery() {
@@ -573,9 +677,8 @@ async function doQuery() {
     state.page = data.page;
     state.lastColumns = data.columns || [];
     state.lastRows = data.rows || [];
-    state.lastUsedFields = resolveUsedFieldsFromPayload(payload);
 
-    renderCurrentResult();
+    renderTable(state.lastColumns, state.lastRows);
     els.pageInfo.textContent = `第 ${state.page} / ${state.totalPages} 页，共 ${state.total} 条`;
     setMessage(els.queryMsg, "查询完成");
   } catch (err) {
@@ -598,7 +701,8 @@ async function doImport() {
     const data = await fetchJson("/api/import-excel", { method: "POST", body: form });
     const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.table}`);
     setMessage(els.importMsg, `导入完成，创建 ${data.count} 张表：${lines.join("；")}`);
-    await loadTables();
+    await loadTableData();
+    await loadColumns();
     state.page = 1;
     if (state.currentTable) await doQuery();
   } catch (err) {
@@ -613,9 +717,7 @@ async function doExport() {
     return;
   }
 
-  payload.visible_columns = state.currentVisibleColumns.length
-    ? [...state.currentVisibleColumns]
-    : [...state.lastColumns];
+  payload.visible_columns = [...state.lastColumns];
 
   try {
     const res = await fetch("/api/export", {
@@ -669,13 +771,34 @@ function bindEnterToQuery() {
 
 function bindEvents() {
   els.importBtn.onclick = doImport;
+
+  els.createFolderBtn.onclick = async () => {
+    const path = (els.newFolderPath.value || "").trim();
+    if (!path) {
+      setMessage(els.importMsg, "请输入文件夹路径", true);
+      return;
+    }
+    try {
+      await fetchJson("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_path: path }),
+      });
+      els.newFolderPath.value = "";
+      await loadTableData();
+      setMessage(els.importMsg, "文件夹创建成功");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "创建文件夹失败", true);
+    }
+  };
+
   els.addFilterBtn.onclick = () => addConditionRow();
   els.addSortBtn.onclick = () => addSortRow();
 
   els.hideSelectedBtn.onclick = async () => {
     const selected = Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value);
     if (!selected.length) {
-      setMessage(els.hiddenMsg, "请先在字段列表中选中要隐藏的字段", true);
+      setMessage(els.hiddenMsg, "请先选中要隐藏的字段", true);
       return;
     }
     setHiddenColumns([...getHiddenColumns(), ...selected]);
@@ -723,18 +846,6 @@ function bindEvents() {
 
   els.exportBtn.onclick = doExport;
 
-  els.showAllFieldsBtn.onclick = () => {
-    state.fieldViewMode = "all";
-    updateFieldToggleButtons();
-    renderCurrentResult();
-  };
-
-  els.showUsedFieldsBtn.onclick = () => {
-    state.fieldViewMode = "used";
-    updateFieldToggleButtons();
-    renderCurrentResult();
-  };
-
   els.prevBtn.onclick = async () => {
     if (state.page <= 1) return;
     state.page -= 1;
@@ -757,10 +868,10 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
-  updateFieldToggleButtons();
   addConditionRow();
   addSortRow();
-  await loadTables();
+  await loadTableData();
+  await loadColumns();
   if (state.currentTable) await doQuery();
 }
 

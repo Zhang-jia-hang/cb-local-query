@@ -15,20 +15,34 @@
       <section class="card hero mb-4">
         <p class="kicker">LOCAL DATA WORKBENCH</p>
         <h1 class="text-2xl font-bold mb-2">勤博数据查询系统</h1>
-        <p class="text-sm text-slate-600">导入 Excel，左侧选表，右侧快速查询与导出</p>
+        <p class="text-sm text-slate-600">支持文件夹、回收站、重命名、多条件查询</p>
       </section>
 
-      <section class="card side-card">
-        <div class="section-head mb-3">
-          <h2 class="text-lg font-semibold">数据表</h2>
-          <span class="badge">实时</span>
+      <section class="card mb-3">
+        <div class="section-head mb-2">
+          <h2 class="text-lg font-semibold">数据表管理</h2>
+          <span class="badge" id="tableCountBadge">0</span>
         </div>
 
-        <div id="tableList" class="table-list mb-3">
+        <div class="folder-create mb-2">
+          <input id="newFolderPath" class="input" placeholder="新建文件夹路径，如：财务/2026/Q1" />
+          <button id="createFolderBtn" class="btn">新建文件夹</button>
+        </div>
+
+        <div id="tableList" class="table-list mb-2">
           <p class="table-empty">暂无数据表</p>
         </div>
 
-        <div class="import-box">
+        <details class="card-lite" open>
+          <summary>回收站</summary>
+          <div id="recycleList" class="recycle-list">
+            <p class="table-empty">回收站为空</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="card side-card">
+        <div class="import-box no-border-top">
           <label class="label">导入 Excel 文件</label>
           <input id="excelFile" type="file" accept=".xlsx,.xls" class="input" />
           <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
@@ -43,6 +57,7 @@
           <h2 class="text-lg font-semibold">查询条件</h2>
           <div class="chips">
             <span class="chip" id="currentTableTag">当前表：未选择</span>
+            <span class="chip" id="currentFolderTag">文件夹：-</span>
             <span class="chip" id="statTotalCols">总字段：0</span>
             <span class="chip" id="statHiddenCols">隐藏：0</span>
             <span class="chip" id="statQueryableCols">可查询：0</span>
@@ -105,11 +120,6 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
-
-            <div class="field-toggle-group">
-              <button id="showAllFieldsBtn" class="btn btn-toggle active">显示全部字段</button>
-              <button id="showUsedFieldsBtn" class="btn btn-toggle">仅显示本次查询字段</button>
-            </div>
             <button id="prevBtn" class="btn">上一页</button>
             <span id="pageInfo" class="text-sm"></span>
             <button id="nextBtn" class="btn">下一页</button>

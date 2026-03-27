@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "app.db"
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 200
+
+META_TABLE = "__table_meta"
+FOLDER_TABLE = "__folder_meta"
+SYSTEM_TABLES = {META_TABLE, FOLDER_TABLE}
 
 _IDENTIFIER_SAFE_RE = re.compile(r"[^0-9A-Za-z_\u4e00-\u9fff]")
 
@@ -41,39 +46,221 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def normalize_folder_path(path: str) -> str:
+    text = (path or "").strip().replace("\\", "/")
+    text = re.sub(r"/+", "/", text).strip("/")
+    return text
+
+
+def now_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def list_tables() -> list[str]:
+def create_system_tables() -> None:
+    with get_conn() as conn:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {META_TABLE} (
+                table_name TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                folder_path TEXT NOT NULL DEFAULT '',
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FOLDER_TABLE} (
+                folder_path TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def list_physical_tables() -> list[str]:
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         ).fetchall()
-    return [r["name"] for r in rows]
+    return [r["name"] for r in rows if r["name"] not in SYSTEM_TABLES]
 
 
-def get_columns(table: str) -> list[str]:
+def sync_table_metadata() -> None:
+    physical = set(list_physical_tables())
+    now = now_str()
+
     with get_conn() as conn:
-        rows = conn.execute(f"PRAGMA table_info({_quote_ident(table)})").fetchall()
-    return [r["name"] for r in rows]
+        meta_rows = conn.execute(f"SELECT table_name FROM {META_TABLE}").fetchall()
+        meta_names = {r["table_name"] for r in meta_rows}
 
+        for t in sorted(physical - meta_names):
+            conn.execute(
+                f"INSERT INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, '', 0, NULL, ?)",
+                (t, t, now),
+            )
 
-def delete_table(table: str) -> None:
-    tables = list_tables()
-    if table not in tables:
-        raise ValueError("table not found")
-    with get_conn() as conn:
-        conn.execute(f"DROP TABLE {_quote_ident(table)}")
+        stale = sorted(meta_names - physical)
+        for t in stale:
+            conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (t,))
+
         conn.commit()
 
 
+def ensure_ready() -> None:
+    create_system_tables()
+    sync_table_metadata()
+
+
+def get_table_record(table_name: str) -> dict[str, Any] | None:
+    ensure_ready()
+    with get_conn() as conn:
+        row = conn.execute(
+            f"SELECT table_name, display_name, folder_path, is_deleted, deleted_at, created_at FROM {META_TABLE} WHERE table_name = ?",
+            (table_name,),
+        ).fetchone()
+    if not row:
+        return None
+    return dict(row)
+
+
+def list_tables(include_deleted: bool = False) -> list[dict[str, Any]]:
+    ensure_ready()
+    sql = f"SELECT table_name, display_name, folder_path, is_deleted, deleted_at, created_at FROM {META_TABLE}"
+    params: list[Any] = []
+    if not include_deleted:
+        sql += " WHERE is_deleted = 0"
+    sql += " ORDER BY folder_path, display_name"
+
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    return [dict(r) for r in rows]
+
+
+def list_folders() -> list[str]:
+    ensure_ready()
+    with get_conn() as conn:
+        rows = conn.execute(f"SELECT folder_path FROM {FOLDER_TABLE} ORDER BY folder_path").fetchall()
+    return [r["folder_path"] for r in rows]
+
+
+def ensure_folder(path: str) -> None:
+    normalized = normalize_folder_path(path)
+    if not normalized:
+        return
+
+    parts = normalized.split("/")
+    now = now_str()
+    curr = ""
+    with get_conn() as conn:
+        for p in parts:
+            curr = p if not curr else f"{curr}/{p}"
+            conn.execute(
+                f"INSERT OR IGNORE INTO {FOLDER_TABLE} (folder_path, created_at) VALUES (?, ?)",
+                (curr, now),
+            )
+        conn.commit()
+
+
+def create_folder(path: str) -> str:
+    normalized = normalize_folder_path(path)
+    if not normalized:
+        raise ValueError("invalid folder path")
+    ensure_folder(normalized)
+    return normalized
+
+
+def rename_table_display(table_name: str, new_name: str) -> None:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+
+    display = (new_name or "").strip()
+    if not display:
+        raise ValueError("invalid display name")
+
+    with get_conn() as conn:
+        conn.execute(f"UPDATE {META_TABLE} SET display_name = ? WHERE table_name = ?", (display, table_name))
+        conn.commit()
+
+
+def move_table_to_folder(table_name: str, folder_path: str) -> str:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+
+    normalized = normalize_folder_path(folder_path)
+    if normalized:
+        ensure_folder(normalized)
+
+    with get_conn() as conn:
+        conn.execute(f"UPDATE {META_TABLE} SET folder_path = ? WHERE table_name = ?", (normalized, table_name))
+        conn.commit()
+
+    return normalized
+
+
+def soft_delete_table(table_name: str) -> None:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+    if record["is_deleted"] == 1:
+        return
+
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE {META_TABLE} SET is_deleted = 1, deleted_at = ? WHERE table_name = ?",
+            (now_str(), table_name),
+        )
+        conn.commit()
+
+
+def restore_table(table_name: str) -> None:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE {META_TABLE} SET is_deleted = 0, deleted_at = NULL WHERE table_name = ?",
+            (table_name,),
+        )
+        conn.commit()
+
+
+def purge_table(table_name: str) -> None:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+
+    with get_conn() as conn:
+        conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+        conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (table_name,))
+        conn.commit()
+
+
+def get_columns(table_name: str) -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute(f"PRAGMA table_info({_quote_ident(table_name)})").fetchall()
+    return [r["name"] for r in rows]
+
+
 def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
+    ensure_ready()
     xls = pd.ExcelFile(file_stream, engine="openpyxl")
     created: list[dict[str, str]] = []
-    used_names: set[str] = set(list_tables())
+    used_names: set[str] = set(list_physical_tables())
+    now = now_str()
 
     with get_conn() as conn:
         for idx, sheet in enumerate(xls.sheet_names, start=1):
@@ -103,7 +290,14 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
             df.columns = cols
             df.to_sql(table_name, conn, if_exists="replace", index=False)
             used_names.add(table_name)
+
+            conn.execute(
+                f"INSERT OR REPLACE INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, COALESCE((SELECT folder_path FROM {META_TABLE} WHERE table_name = ?), ''), 0, NULL, COALESCE((SELECT created_at FROM {META_TABLE} WHERE table_name = ?), ?))",
+                (table_name, sheet, table_name, table_name, now),
+            )
             created.append({"sheet": sheet, "table": table_name})
+
+        conn.commit()
 
     return {"created": created, "count": len(created)}
 
@@ -258,6 +452,15 @@ def build_where_clause(
     return " WHERE " + " AND ".join(parts), params
 
 
+def assert_active_table(table_name: str) -> dict[str, Any]:
+    record = get_table_record(table_name)
+    if not record:
+        raise ValueError("table not found")
+    if int(record.get("is_deleted", 0)) == 1:
+        raise ValueError("table is in recycle bin")
+    return record
+
+
 def query_table(
     table: str,
     page: int,
@@ -269,9 +472,7 @@ def query_table(
     sort_order: str,
     hidden_columns: list[str],
 ) -> dict[str, Any]:
-    tables = list_tables()
-    if table not in tables:
-        raise ValueError("table not found")
+    assert_active_table(table)
 
     all_columns = get_columns(table)
     query_columns = apply_hidden_columns(all_columns, hidden_columns)
@@ -316,9 +517,7 @@ def fetch_all_rows_for_export(
     sort_order: str,
     hidden_columns: list[str],
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    tables = list_tables()
-    if table not in tables:
-        raise ValueError("table not found")
+    assert_active_table(table)
 
     all_columns = get_columns(table)
     query_columns = apply_hidden_columns(all_columns, hidden_columns)
@@ -378,6 +577,7 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    ensure_ready()
 
     @app.get("/")
     def index() -> str:
@@ -385,24 +585,87 @@ def create_app() -> Flask:
 
     @app.get("/api/tables")
     def api_tables():
-        return jsonify({"tables": list_tables()})
+        return jsonify({"tables": list_tables(include_deleted=False), "folders": list_folders()})
+
+    @app.get("/api/recycle-bin")
+    def api_recycle_bin():
+        items = [x for x in list_tables(include_deleted=True) if int(x["is_deleted"]) == 1]
+        return jsonify({"tables": items})
+
+    @app.post("/api/folders")
+    def api_create_folder():
+        payload = request.get_json(silent=True) or {}
+        folder_path = payload.get("folder_path") or ""
+        try:
+            folder = create_folder(folder_path)
+            return jsonify({"folder": folder})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"创建文件夹失败: {ex}"}), 500
 
     @app.get("/api/table/<table>/columns")
     def api_columns(table: str):
-        tables = list_tables()
-        if table not in tables:
-            return jsonify({"error": "table not found"}), 404
-        return jsonify({"columns": get_columns(table)})
+        try:
+            assert_active_table(table)
+            return jsonify({"columns": get_columns(table)})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 404
 
+    @app.patch("/api/table/<table>/rename")
+    def api_rename_table(table: str):
+        payload = request.get_json(silent=True) or {}
+        new_name = payload.get("display_name") or ""
+        try:
+            rename_table_display(table, new_name)
+            return jsonify({"ok": True})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"重命名失败: {ex}"}), 500
+
+    @app.patch("/api/table/<table>/move")
+    def api_move_table(table: str):
+        payload = request.get_json(silent=True) or {}
+        folder_path = payload.get("folder_path") or ""
+        try:
+            folder = move_table_to_folder(table, folder_path)
+            return jsonify({"folder": folder})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"移动失败: {ex}"}), 500
+
+    @app.post("/api/table/<table>/delete")
     @app.delete("/api/table/<table>")
     def api_delete_table(table: str):
         try:
-            delete_table(table)
+            soft_delete_table(table)
             return jsonify({"deleted": table})
         except ValueError as ex:
             return jsonify({"error": str(ex)}), 404
         except Exception as ex:
             return jsonify({"error": f"删除失败: {ex}"}), 500
+
+    @app.post("/api/table/<table>/restore")
+    def api_restore_table(table: str):
+        try:
+            restore_table(table)
+            return jsonify({"restored": table})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 404
+        except Exception as ex:
+            return jsonify({"error": f"恢复失败: {ex}"}), 500
+
+    @app.delete("/api/table/<table>/purge")
+    def api_purge_table(table: str):
+        try:
+            purge_table(table)
+            return jsonify({"purged": table})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 404
+        except Exception as ex:
+            return jsonify({"error": f"彻底删除失败: {ex}"}), 500
 
     @app.post("/api/import-excel")
     def api_import_excel():
