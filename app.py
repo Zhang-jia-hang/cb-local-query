@@ -1,5 +1,7 @@
-﻿from __future__ import annotations
+﻿# 兼容Python 3.x低版本的注解语法
+from __future__ import annotations
 
+# 标准库导入：IO、正则、SQLite、临时文件、线程、时间、浏览器、日期、路径、类型注解
 import io
 import re
 import sqlite3
@@ -11,60 +13,83 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# 第三方库：数据处理、Web框架
 import pandas as pd
 from flask import Flask, jsonify, render_template, request, send_file
 
+# ===================== 全局路径与常量配置 =====================
+# 获取当前文件所在的根目录
 BASE_DIR = Path(__file__).resolve().parent
+# 数据存储目录
 DATA_DIR = BASE_DIR / "data"
+# 自动创建目录（已存在则不报错）
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+# SQLite数据库文件路径
 DB_PATH = DATA_DIR / "app.db"
+# 默认分页大小
 DEFAULT_PAGE_SIZE = 20
+# 最大允许分页大小
 MAX_PAGE_SIZE = 200
 
-META_TABLE = "__table_meta"
-FOLDER_TABLE = "__folder_meta"
-COLUMN_META_TABLE = "__column_meta"
+# 系统内置表名（用于存储元数据，非用户数据表）
+META_TABLE = "__table_meta"        # 数据表元信息
+FOLDER_TABLE = "__folder_meta"     # 文件夹目录信息
+COLUMN_META_TABLE = "__column_meta" # 列元信息（是否数值类型）
 SYSTEM_TABLES = {META_TABLE, FOLDER_TABLE, COLUMN_META_TABLE}
 
+# 正则：只保留字母、数字、下划线、中文，用于规范化表名/列名
 _IDENTIFIER_SAFE_RE = re.compile(r"[^0-9A-Za-z_\u4e00-\u9fff]")
 
-
+# ===================== 工具函数：名称规范化 =====================
 def _normalize_identifier(raw: str, fallback: str) -> str:
+    """
+    规范化表名/列名：去除特殊字符、空格转下划线、处理重名、数字开头加前缀
+    :param raw: 原始名称
+    :param fallback: 为空时的默认名称
+    :return: 安全可用的SQL标识符
+    """
     text = (raw or "").strip()
     if not text:
         return fallback
+    # 空格转下划线
     text = text.replace(" ", "_")
+    # 非法字符替换为下划线
     text = _IDENTIFIER_SAFE_RE.sub("_", text)
+    # 多个下划线合并为一个，去除首尾下划线
     text = re.sub(r"_+", "_", text).strip("_")
     if not text:
         return fallback
+    # 数字开头则添加 t_ 前缀，避免SQL语法错误
     if text[0].isdigit():
         text = f"t_{text}"
     return text
 
-
 def _quote_ident(name: str) -> str:
+    """给SQL标识符加双引号，防止关键字冲突、支持中文表名/列名"""
     return '"' + name.replace('"', '""') + '"'
 
-
 def normalize_folder_path(path: str) -> str:
+    """规范化文件夹路径：统一为/分隔、去除多余斜杠、首尾无斜杠"""
     text = (path or "").strip().replace("\\", "/")
     text = re.sub(r"/+", "/", text).strip("/")
     return text
 
-
 def now_str() -> str:
+    """获取当前时间字符串：YYYY-MM-DD HH:MM:SS"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-
+# ===================== 数据库连接 =====================
 def get_conn() -> sqlite3.Connection:
+    """创建并返回SQLite连接，行数据以字典形式返回"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-
+# ===================== 系统表初始化 =====================
 def create_system_tables() -> None:
+    """创建三张系统元数据表（不存在则创建）"""
     with get_conn() as conn:
+        # 表元信息
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {META_TABLE} (
@@ -77,6 +102,7 @@ def create_system_tables() -> None:
             )
             """
         )
+        # 文件夹目录
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {FOLDER_TABLE} (
@@ -85,6 +111,7 @@ def create_system_tables() -> None:
             )
             """
         )
+        # 列元数据（是否数值列）
         conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {COLUMN_META_TABLE} (
@@ -98,17 +125,22 @@ def create_system_tables() -> None:
         )
         conn.commit()
 
-
+# ===================== 表同步与元数据维护 =====================
 def list_physical_tables() -> list[str]:
+    """查询SQLite中真实存在的用户数据表（排除系统表）"""
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         ).fetchall()
     return [r["name"] for r in rows if r["name"] not in SYSTEM_TABLES]
 
-
 def sync_table_metadata() -> None:
-    # 保持元数据与实际 SQLite 表同步，避免界面出现脏数据或孤儿记录。
+    """
+    同步数据库表与元数据：
+    1. 新增物理表 → 补充元数据
+    2. 物理表已删除 → 删除对应元数据
+    保持界面显示与真实库一致
+    """
     physical = set(list_physical_tables())
     now = now_str()
 
@@ -116,12 +148,14 @@ def sync_table_metadata() -> None:
         meta_rows = conn.execute(f"SELECT table_name FROM {META_TABLE}").fetchall()
         meta_names = {r["table_name"] for r in meta_rows}
 
+        # 新增表：插入元数据
         for t in sorted(physical - meta_names):
             conn.execute(
                 f"INSERT INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, '', 0, NULL, ?)",
                 (t, t, now),
             )
 
+        # 无效表：清理元数据
         stale = sorted(meta_names - physical)
         for t in stale:
             conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (t,))
@@ -129,13 +163,14 @@ def sync_table_metadata() -> None:
 
         conn.commit()
 
-
 def ensure_ready() -> None:
+    """确保系统表创建完成、元数据同步完成（入口初始化）"""
     create_system_tables()
     sync_table_metadata()
 
-
+# ===================== 表/文件夹基础操作 =====================
 def get_table_record(table_name: str) -> dict[str, Any] | None:
+    """根据表名获取表元数据记录"""
     ensure_ready()
     with get_conn() as conn:
         row = conn.execute(
@@ -146,8 +181,8 @@ def get_table_record(table_name: str) -> dict[str, Any] | None:
         return None
     return dict(row)
 
-
 def list_tables(include_deleted: bool = False) -> list[dict[str, Any]]:
+    """获取表列表（默认不包含已软删除）"""
     ensure_ready()
     sql = f"SELECT table_name, display_name, folder_path, is_deleted, deleted_at, created_at FROM {META_TABLE}"
     params: list[Any] = []
@@ -160,20 +195,22 @@ def list_tables(include_deleted: bool = False) -> list[dict[str, Any]]:
 
     return [dict(r) for r in rows]
 
-
 def list_folders() -> list[str]:
+    """获取所有文件夹路径"""
     ensure_ready()
     with get_conn() as conn:
         rows = conn.execute(f"SELECT folder_path FROM {FOLDER_TABLE} ORDER BY folder_path").fetchall()
     return [r["folder_path"] for r in rows]
 
-
 def ensure_folder(path: str) -> None:
+    """
+    确保多级文件夹路径存在（自动创建父级）
+    例如传入 a/b/c → 自动创建 a、a/b、a/b/c
+    """
     normalized = normalize_folder_path(path)
     if not normalized:
         return
 
-    # 按层级补齐父级目录，确保多级文件夹路径可被正确识别与展示。
     parts = normalized.split("/")
     now = now_str()
     curr = ""
@@ -186,16 +223,16 @@ def ensure_folder(path: str) -> None:
             )
         conn.commit()
 
-
 def create_folder(path: str) -> str:
+    """创建文件夹（对外接口）"""
     normalized = normalize_folder_path(path)
     if not normalized:
         raise ValueError("invalid folder path")
     ensure_folder(normalized)
     return normalized
 
-
 def rename_table_display(table_name: str, new_name: str) -> None:
+    """修改表的显示名称（不修改物理表名）"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -208,8 +245,8 @@ def rename_table_display(table_name: str, new_name: str) -> None:
         conn.execute(f"UPDATE {META_TABLE} SET display_name = ? WHERE table_name = ?", (display, table_name))
         conn.commit()
 
-
 def move_table_to_folder(table_name: str, folder_path: str) -> str:
+    """移动表到指定文件夹"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -224,8 +261,9 @@ def move_table_to_folder(table_name: str, folder_path: str) -> str:
 
     return normalized
 
-
+# ===================== 表删除/恢复/彻底删除 =====================
 def soft_delete_table(table_name: str) -> None:
+    """软删除：标记删除，不删除物理表"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -239,8 +277,8 @@ def soft_delete_table(table_name: str) -> None:
         )
         conn.commit()
 
-
 def restore_table(table_name: str) -> None:
+    """从回收站恢复表"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -252,8 +290,8 @@ def restore_table(table_name: str) -> None:
         )
         conn.commit()
 
-
 def purge_table(table_name: str) -> None:
+    """彻底删除表：删除物理表 + 删除所有元数据"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -264,20 +302,20 @@ def purge_table(table_name: str) -> None:
         conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (table_name,))
         conn.commit()
 
-
+# ===================== 列信息与数值列识别 =====================
 def get_columns(table_name: str) -> list[str]:
+    """获取表的所有列名"""
     with get_conn() as conn:
         rows = conn.execute(f"PRAGMA table_info({_quote_ident(table_name)})").fetchall()
     return [r["name"] for r in rows]
 
-
 def _is_numeric_series(series: pd.Series) -> bool:
+    """判断Pandas列是否为纯数值（无无效值）"""
     cleaned = series.dropna()
     if cleaned.empty:
         return False
     parsed = pd.to_numeric(cleaned, errors="coerce")
     return bool(parsed.notna().all())
-
 
 def _save_column_meta(
     conn: sqlite3.Connection,
@@ -286,14 +324,15 @@ def _save_column_meta(
     numeric_columns: set[str],
     created_at: str,
 ) -> None:
+    """保存列元数据：标记哪些列是数值类型"""
     conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (table_name,))
     conn.executemany(
         f"INSERT INTO {COLUMN_META_TABLE} (table_name, column_name, is_numeric, created_at) VALUES (?, ?, ?, ?)",
         [(table_name, c, 1 if c in numeric_columns else 0, created_at) for c in columns],
     )
 
-
 def _infer_numeric_columns_from_table(table_name: str, columns: list[str]) -> set[str]:
+    """从表数据中抽样推断哪些列是数值列"""
     numeric: set[str] = set()
     if not columns:
         return numeric
@@ -310,8 +349,12 @@ def _infer_numeric_columns_from_table(table_name: str, columns: list[str]) -> se
                 numeric.add(col)
     return numeric
 
-
 def get_numeric_columns(table_name: str, columns: list[str] | None = None) -> set[str]:
+    """
+    获取表的数值列：
+    1. 优先读元数据
+    2. 无元数据则自动推断并保存
+    """
     ensure_ready()
     cols = columns or get_columns(table_name)
     if not cols:
@@ -332,8 +375,15 @@ def get_numeric_columns(table_name: str, columns: list[str] | None = None) -> se
         conn.commit()
     return inferred
 
-
+# ===================== Excel 导入 =====================
 def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
+    """
+    导入Excel文件到SQLite：
+    1. 每个sheet → 一张表
+    2. 自动规范化表名、列名（去重、安全字符）
+    3. 自动识别数值列
+    4. 写入元数据
+    """
     ensure_ready()
     xls = pd.ExcelFile(file_stream, engine="openpyxl")
     created: list[dict[str, str]] = []
@@ -359,11 +409,11 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
             cols: list[str] = []
             numeric_cols: set[str] = set()
             seen_cols: set[str] = set()
+            # 列名规范化 + 去重
             for cidx, col in enumerate(src_columns, start=1):
                 col_name = _normalize_identifier(str(col), f"col_{cidx}")
                 candidate = col_name
                 csuffix = 1
-                # 字段名规范化后若重复，追加后缀保证唯一性。
                 while candidate in seen_cols:
                     csuffix += 1
                     candidate = f"{col_name}_{csuffix}"
@@ -376,6 +426,7 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
             df.to_sql(table_name, conn, if_exists="replace", index=False)
             used_names.add(table_name)
 
+            # 更新表元数据
             conn.execute(
                 f"INSERT OR REPLACE INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, COALESCE((SELECT folder_path FROM {META_TABLE} WHERE table_name = ?), ''), 0, NULL, COALESCE((SELECT created_at FROM {META_TABLE} WHERE table_name = ?), ?))",
                 (table_name, sheet, table_name, table_name, now),
@@ -387,13 +438,14 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
 
     return {"created": created, "count": len(created)}
 
-
+# ===================== 查询构建工具 =====================
 def apply_hidden_columns(all_columns: list[str], hidden_columns: list[str]) -> list[str]:
+    """过滤隐藏列，返回前端可见列"""
     hidden_set = {c for c in hidden_columns if c in all_columns}
     return [c for c in all_columns if c not in hidden_set]
 
-
 def build_global_clause(columns: list[str], global_keyword: str) -> tuple[str, list[Any]]:
+    """构建全局搜索条件：所有列模糊匹配关键词"""
     if not global_keyword:
         return "", []
 
@@ -407,8 +459,8 @@ def build_global_clause(columns: list[str], global_keyword: str) -> tuple[str, l
         return "", []
     return "(" + " OR ".join(parts) + ")", params
 
-
 def _to_float(value: Any) -> float | None:
+    """安全转为浮点数，失败返回None"""
     if value is None:
         return None
     text = str(value).strip()
@@ -419,12 +471,17 @@ def _to_float(value: Any) -> float | None:
     except Exception:
         return None
 
-
 def build_conditions_clause(
     columns: list[str],
     numeric_columns: set[str],
     conditions: list[dict[str, Any]],
 ) -> tuple[str, list[Any]]:
+    """
+    构建高级查询条件：
+    - 文本：模糊匹配
+    - 数值：范围查询
+    支持 AND/OR 组合
+    """
     if not conditions:
         return "", []
 
@@ -443,6 +500,7 @@ def build_conditions_clause(
         expr = ""
         expr_params: list[Any] = []
 
+        # 数值范围
         if ctype == "range":
             if field not in numeric_columns:
                 raise ValueError(f"范围查询字段必须为数值类型: {field}")
@@ -458,6 +516,7 @@ def build_conditions_clause(
             elif max_v is not None:
                 expr = f"{qfield} <= ?"
                 expr_params.append(max_v)
+        # 文本模糊
         else:
             value = str(cond.get("value") or "").strip()
             if value:
@@ -489,6 +548,7 @@ def normalize_sort_rules(
     fallback_field: str,
     fallback_order: str,
 ) -> list[tuple[str, str]]:
+    """规范化排序规则，过滤无效列，提供默认排序"""
     rules: list[tuple[str, str]] = []
 
     for item in sort_rules:
@@ -516,6 +576,7 @@ def build_order_clause(
     fallback_field: str,
     fallback_order: str,
 ) -> str:
+    """构建ORDER BY子句"""
     normalized = normalize_sort_rules(columns, sort_rules, fallback_field, fallback_order)
     if not normalized:
         return ""
@@ -529,7 +590,10 @@ def build_where_clause(
     global_keyword: str,
     conditions: list[dict[str, Any]],
 ) -> tuple[str, list[Any]]:
-    # 全局关键词与结构化条件均为可选，存在时按 AND 组合。
+    """
+    整合WHERE条件：
+    全局搜索 + 高级条件 → 用AND连接
+    """
     global_expr, global_params = build_global_clause(query_columns, global_keyword)
     cond_expr, cond_params = build_conditions_clause(query_columns, numeric_columns, conditions)
 
@@ -548,6 +612,7 @@ def build_where_clause(
 
 
 def assert_active_table(table_name: str) -> dict[str, Any]:
+    """断言表存在且未被软删除"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -555,7 +620,7 @@ def assert_active_table(table_name: str) -> dict[str, Any]:
         raise ValueError("table is in recycle bin")
     return record
 
-
+# ===================== 数据查询与分页 =====================
 def query_table(
     table: str,
     page: int,
@@ -567,6 +632,11 @@ def query_table(
     sort_order: str,
     hidden_columns: list[str],
 ) -> dict[str, Any]:
+    """
+    数据表分页查询：
+    支持搜索、筛选、排序、隐藏列、分页
+    返回列名、数据、总数、页码信息
+    """
     assert_active_table(table)
 
     all_columns = get_columns(table)
@@ -579,6 +649,7 @@ def query_table(
     order_clause = build_order_clause(query_columns, sort_rules, sort_field, sort_order)
     select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
+    # 安全分页参数
     safe_page = max(1, page)
     safe_size = min(MAX_PAGE_SIZE, max(1, page_size))
     # 使用 LIMIT/OFFSET 分页，保证翻页行为稳定。
@@ -604,7 +675,7 @@ def query_table(
         "total_pages": total_pages,
     }
 
-
+# ===================== 导出数据 =====================
 def fetch_all_rows_for_export(
     table: str,
     global_keyword: str,
@@ -614,6 +685,7 @@ def fetch_all_rows_for_export(
     sort_order: str,
     hidden_columns: list[str],
 ) -> tuple[list[str], list[dict[str, Any]]]:
+    """查询全部数据（不分页）用于导出"""
     assert_active_table(table)
 
     all_columns = get_columns(table)
@@ -636,6 +708,11 @@ def fetch_all_rows_for_export(
 
 
 def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, bytes]:
+    """
+    按查询条件导出Excel：
+    支持隐藏列、筛选条件、排序
+    返回文件名 + 文件字节流
+    """
     hidden_columns = payload.get("hidden_columns") or []
     if not isinstance(hidden_columns, list):
         hidden_columns = []
@@ -658,6 +735,7 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
         hidden_columns=hidden_columns,
     )
 
+    # 按界面可见列导出
     visible_columns = payload.get("visible_columns") or []
     # 若前端传入可见列，则按当前界面可见列导出。
     if isinstance(visible_columns, list) and visible_columns:
@@ -673,24 +751,29 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
         df.to_excel(writer, index=False, sheet_name=table[:31] or "result")
     return f"{table}_query_result.xlsx", bio.getvalue()
 
-
+# ===================== Flask Web 应用 =====================
 def create_app() -> Flask:
+    """创建Flask应用，注册所有API路由"""
     app = Flask(__name__)
     ensure_ready()
 
+    # 首页
     @app.get("/")
     def index() -> str:
         return render_template("index.html")
 
+    # 获取表列表 + 文件夹列表
     @app.get("/api/tables")
     def api_tables():
         return jsonify({"tables": list_tables(include_deleted=False), "folders": list_folders()})
 
+    # 回收站：已删除表
     @app.get("/api/recycle-bin")
     def api_recycle_bin():
         items = [x for x in list_tables(include_deleted=True) if int(x["is_deleted"]) == 1]
         return jsonify({"tables": items})
 
+    # 创建文件夹
     @app.post("/api/folders")
     def api_create_folder():
         payload = request.get_json(silent=True) or {}
@@ -703,6 +786,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"创建文件夹失败: {ex}"}), 500
 
+    # 获取表的列 + 数值列
     @app.get("/api/table/<table>/columns")
     def api_columns(table: str):
         try:
@@ -713,6 +797,7 @@ def create_app() -> Flask:
         except ValueError as ex:
             return jsonify({"error": str(ex)}), 404
 
+    # 重命名表显示名
     @app.patch("/api/table/<table>/rename")
     def api_rename_table(table: str):
         payload = request.get_json(silent=True) or {}
@@ -725,6 +810,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"重命名失败: {ex}"}), 500
 
+    # 移动表到文件夹
     @app.patch("/api/table/<table>/move")
     def api_move_table(table: str):
         payload = request.get_json(silent=True) or {}
@@ -737,6 +823,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"移动失败: {ex}"}), 500
 
+    # 软删除表
     @app.post("/api/table/<table>/delete")
     @app.delete("/api/table/<table>")
     def api_delete_table(table: str):
@@ -748,6 +835,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"删除失败: {ex}"}), 500
 
+    # 恢复表
     @app.post("/api/table/<table>/restore")
     def api_restore_table(table: str):
         try:
@@ -758,6 +846,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"恢复失败: {ex}"}), 500
 
+    # 彻底删除表
     @app.delete("/api/table/<table>/purge")
     def api_purge_table(table: str):
         try:
@@ -768,6 +857,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"彻底删除失败: {ex}"}), 500
 
+    # 上传并导入Excel
     @app.post("/api/import-excel")
     def api_import_excel():
         if "file" not in request.files:
@@ -783,6 +873,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"导入失败: {ex}"}), 500
 
+    # 数据查询（分页、搜索、筛选、排序）
     @app.post("/api/query")
     def api_query():
         payload = request.get_json(silent=True) or {}
@@ -820,6 +911,7 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"查询失败: {ex}"}), 500
 
+    # 导出查询结果为Excel
     @app.post("/api/export")
     def api_export():
         payload = request.get_json(silent=True) or {}
@@ -843,21 +935,22 @@ def create_app() -> Flask:
 
     return app
 
-
+# ===================== 启动应用 =====================
 def run_app() -> None:
+    """启动Flask服务，自动打开浏览器"""
     app = create_app()
     host = "127.0.0.1"
     port = 5000
     url = f"http://{host}:{port}"
 
     def open_browser_later() -> None:
-        # 稍作延迟，避免 Flask 尚未监听端口时浏览器提前打开。
+        # 延迟打开浏览器，确保服务已启动
         time.sleep(1.2)
         webbrowser.open(url)
 
     threading.Thread(target=open_browser_later, daemon=True).start()
     app.run(host=host, port=port, debug=False, use_reloader=False)
 
-
+# 主入口
 if __name__ == "__main__":
     run_app()

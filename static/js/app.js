@@ -1,21 +1,23 @@
-﻿const state = {
-  tables: [],
-  recycleBin: [],
-  folders: [],
-  columns: [],
-  numericColumns: [],
-  hiddenColumnsByTable: {},
-  currentTable: "",
-  page: 1,
-  totalPages: 1,
-  total: 0,
-  lastRows: [],
-  lastColumns: [],
-  querying: false,
-  moveTargetTable: "",
-  moveTargetDisplayName: "",
+﻿// ===================== 全局状态管理：存储页面所有数据 =====================
+const state = {
+  tables: [],                  // 数据表列表
+  recycleBin: [],              // 回收站（软删除表）
+  folders: [],                // 文件夹列表
+  columns: [],                // 当前表所有字段
+  numericColumns: [],         // 当前表数值类型字段
+  hiddenColumnsByTable: {},    // 按表存储隐藏字段
+  currentTable: "",            // 当前选中的表名
+  page: 1,                    // 当前页码
+  totalPages: 1,              // 总页数
+  total: 0,                   // 数据总条数
+  lastRows: [],               // 上一次查询的数据行
+  lastColumns: [],            // 上一次查询的显示列
+  querying: false,            // 是否正在查询中（防重复提交）
+  moveTargetTable: "",        // 待移动的表名
+  moveTargetDisplayName: "",  // 待移动表的显示名
 };
 
+// ===================== DOM 元素缓存：统一管理页面所有节点 =====================
 const els = {
   excelFile: document.getElementById("excelFile"),
   importBtn: document.getElementById("importBtn"),
@@ -68,12 +70,15 @@ const els = {
   pageInfo: document.getElementById("pageInfo"),
 };
 
+// ===================== 通用工具函数 =====================
+/** 统一设置提示消息，支持错误样式 */
 function setMessage(el, text, isError = false) {
   if (!el) return;
   el.textContent = text || "";
   el.className = `text-sm mt-2 ${isError ? "text-red-600" : "text-slate-600"}`;
 }
 
+/** 设置查询状态：禁用/启用按钮，防止重复提交 */
 function setQueryBusy(busy) {
   state.querying = busy;
   els.searchBtn.disabled = busy;
@@ -83,6 +88,7 @@ function setQueryBusy(busy) {
   els.searchBtn.textContent = busy ? "查询中..." : "查询";
 }
 
+/** 创建下拉选项 */
 function createOption(value, label) {
   const op = document.createElement("option");
   op.value = value;
@@ -90,15 +96,18 @@ function createOption(value, label) {
   return op;
 }
 
+/** 清空结果表格，显示空数据提示 */
 function clearTableView(message = "暂无数据") {
   els.resultTable.innerHTML = `<tr><td class='p-3'>${message}</td></tr>`;
   els.pageInfo.textContent = "";
 }
 
+/** 获取当前选中表的元数据 */
 function currentTableMeta() {
   return state.tables.find((t) => t.table_name === state.currentTable) || null;
 }
 
+/** 刷新顶部当前表/文件夹标签 */
 function refreshHeaderTags() {
   const meta = currentTableMeta();
   els.currentTableTag.textContent = meta ? `当前表：${meta.display_name}` : "当前表：未选择";
@@ -114,6 +123,7 @@ function normalizeFolderPathClient(path) {
     .replace(/^\/+|\/+$/g, "");
 }
 
+/** 获取当前表的隐藏字段 */
 function getHiddenColumns() {
   const table = state.currentTable;
   if (!table) return [];
@@ -121,6 +131,7 @@ function getHiddenColumns() {
   return state.hiddenColumnsByTable[table];
 }
 
+/** 设置当前表的隐藏字段（自动去重、校验有效性） */
 function setHiddenColumns(columns) {
   const table = state.currentTable;
   if (!table) return;
@@ -128,16 +139,19 @@ function setHiddenColumns(columns) {
   state.hiddenColumnsByTable[table] = unique;
 }
 
+/** 获取可查询字段（排除隐藏） */
 function getQueryableColumns() {
   const hidden = new Set(getHiddenColumns());
   return state.columns.filter((c) => !hidden.has(c));
 }
 
+/** 获取可查询的数值字段 */
 function getQueryableNumericColumns() {
   const queryable = new Set(getQueryableColumns());
   return state.numericColumns.filter((c) => queryable.has(c));
 }
 
+/** 刷新字段统计信息 */
 function refreshStats() {
   const total = state.columns.length;
   const hidden = getHiddenColumns().length;
@@ -147,6 +161,7 @@ function refreshStats() {
   els.statQueryableCols.textContent = `可查询：${queryable}`;
 }
 
+/** HTML 转义，防止 XSS */
 function escapeHtml(val) {
   return String(val)
     .replaceAll("&", "&amp;")
@@ -156,16 +171,19 @@ function escapeHtml(val) {
     .replaceAll("'", "&#39;");
 }
 
+/** 判断字符串是否为浮点数格式 */
 function isFloatString(text) {
   return /^[-+]?\d*\.\d+(e[-+]?\d+)?$/i.test(text);
 }
 
+/** 数字转百分比文本（保留2位小数） */
 function toPercentText(num) {
   const scaled = num * 100;
   const rounded = Number(scaled.toFixed(2));
   return `${rounded.toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
+/** 格式化表格显示值：小数自动转百分比 */
 function formatDisplayValue(val) {
   if (val === null || val === undefined || val === "") return "";
   if (typeof val === "number") {
@@ -182,6 +200,7 @@ function formatDisplayValue(val) {
   return val;
 }
 
+/** 封装 fetch 请求，自动处理 JSON、错误信息 */
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const contentType = res.headers.get("content-type") || "";
@@ -197,6 +216,7 @@ async function fetchJson(url, options = {}) {
   return null;
 }
 
+/** 创建文件夹（调用后端接口） */
 async function createFolder(path) {
   const normalized = normalizeFolderPathClient(path);
   if (!normalized) throw new Error("请输入有效的文件夹路径");
@@ -210,6 +230,8 @@ async function createFolder(path) {
   return normalized;
 }
 
+// ===================== 数据加载 =====================
+/** 加载数据表 + 回收站 + 文件夹数据 */
 async function loadTableData() {
   const [tableData, recycleData] = await Promise.all([fetchJson("/api/tables"), fetchJson("/api/recycle-bin")]);
 
@@ -217,6 +239,7 @@ async function loadTableData() {
   state.folders = tableData.folders || [];
   state.recycleBin = recycleData.tables || [];
 
+  // 当前表不存在时，自动选中第一个表
   if (!state.tables.find((t) => t.table_name === state.currentTable)) {
     state.currentTable = state.tables[0]?.table_name || "";
   }
@@ -224,6 +247,8 @@ async function loadTableData() {
   renderTableManager();
 }
 
+// ===================== 左侧表格/文件夹/回收站渲染 =====================
+/** 渲染左侧表格管理面板（分组展示） */
 function renderTableManager() {
   els.tableCountBadge.textContent = String(state.tables.length);
 
@@ -231,15 +256,18 @@ function renderTableManager() {
   const root = "";
   groupMap.set(root, []);
 
+  // 初始化所有文件夹分组
   state.folders.forEach((f) => {
     if (!groupMap.has(f)) groupMap.set(f, []);
   });
+  // 数据表按文件夹分组
   state.tables.forEach((t) => {
     const folder = t.folder_path || "";
     if (!groupMap.has(folder)) groupMap.set(folder, []);
     groupMap.get(folder).push(t);
   });
 
+  // 文件夹排序
   const folders = Array.from(groupMap.keys()).sort((a, b) => {
     if (a === "") return -1;
     if (b === "") return 1;
@@ -280,6 +308,7 @@ function renderTableManager() {
   refreshHeaderTags();
 }
 
+/** 打开移动表弹窗 */
 function openMoveModal(table) {
   state.moveTargetTable = table.table_name;
   state.moveTargetDisplayName = table.display_name || table.table_name;
@@ -295,6 +324,7 @@ function openMoveModal(table) {
   els.moveModal.setAttribute("aria-hidden", "false");
 }
 
+/** 关闭移动表弹窗 */
 function closeMoveModal() {
   els.moveModal.classList.add("hidden");
   els.moveModal.setAttribute("aria-hidden", "true");
@@ -304,6 +334,7 @@ function closeMoveModal() {
   setMessage(els.moveModalMsg, "");
 }
 
+/** 渲染移动弹窗的文件夹下拉选项 */
 function renderMoveFolderOptions(selectedFolder = "") {
   const selected = normalizeFolderPathClient(selectedFolder);
   const folders = [...new Set(state.folders.map((f) => normalizeFolderPathClient(f)).filter(Boolean))].sort((a, b) =>
@@ -328,15 +359,18 @@ async function submitMove() {
   let targetFolder = normalizeFolderPathClient(els.moveNewFolderInput.value || "");
 
   try {
+    // 新建文件夹
     if (targetFolder) {
       targetFolder = await createFolder(targetFolder);
       await loadTableData();
       renderMoveFolderOptions(targetFolder);
       els.moveFolderSelect.value = targetFolder;
     } else {
+      // 选择已有文件夹
       targetFolder = normalizeFolderPathClient(els.moveFolderSelect.value || "");
     }
 
+    // 调用移动接口
     await fetchJson(`/api/table/${encodeURIComponent(state.moveTargetTable)}/move`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -351,10 +385,12 @@ async function submitMove() {
   }
 }
 
+/** 渲染单张数据表行（选择、重命名、移动、删除） */
 function renderTableRow(table) {
   const row = document.createElement("div");
   row.className = "table-manage-row";
 
+  // 选择表按钮
   const selectBtn = document.createElement("button");
   selectBtn.type = "button";
   selectBtn.className = `table-item${state.currentTable === table.table_name ? " active" : ""}`;
@@ -368,9 +404,11 @@ function renderTableRow(table) {
     await doQuery();
   };
 
+  // 操作按钮组
   const actions = document.createElement("div");
   actions.className = "row-actions";
 
+  // 重命名
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
   renameBtn.className = "btn btn-mini";
@@ -392,12 +430,14 @@ function renderTableRow(table) {
     }
   };
 
+  // 移动
   const moveBtn = document.createElement("button");
   moveBtn.type = "button";
   moveBtn.className = "btn btn-mini";
   moveBtn.textContent = "移动";
   moveBtn.onclick = () => openMoveModal(table);
 
+  // 删除（软删除）
   const delBtn = document.createElement("button");
   delBtn.type = "button";
   delBtn.className = "btn btn-danger btn-mini";
@@ -433,6 +473,7 @@ function renderTableRow(table) {
   return row;
 }
 
+/** 渲染回收站列表 */
 function renderRecycleBin() {
   els.recycleList.innerHTML = "";
   if (!state.recycleBin.length) {
@@ -451,6 +492,7 @@ function renderRecycleBin() {
     const acts = document.createElement("div");
     acts.className = "row-actions";
 
+    // 恢复
     const restore = document.createElement("button");
     restore.className = "btn btn-mini";
     restore.textContent = "恢复";
@@ -464,6 +506,7 @@ function renderRecycleBin() {
       }
     };
 
+    // 彻底删除
     const purge = document.createElement("button");
     purge.className = "btn btn-danger btn-mini";
     purge.textContent = "彻底删除";
@@ -488,6 +531,8 @@ function renderRecycleBin() {
   });
 }
 
+// ===================== 字段/列管理 =====================
+/** 加载当前表的字段 + 数值字段 */
 async function loadColumns() {
   if (!state.currentTable) {
     state.columns = [];
@@ -507,6 +552,7 @@ async function loadColumns() {
     state.numericColumns = [];
   }
 
+  // 清理无效的隐藏字段
   const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
   setHiddenColumns(stillValidHidden);
 
@@ -515,6 +561,7 @@ async function loadColumns() {
   refreshFieldSelectors();
 }
 
+/** 刷新隐藏字段面板 */
 function refreshHiddenColumnsPanel() {
   els.hiddenColumns.innerHTML = "";
   if (!state.columns.length) {
@@ -535,6 +582,7 @@ function refreshHiddenColumnsPanel() {
   refreshStats();
 }
 
+/** 刷新筛选条件的字段下拉选项 */
 function refreshConditionFieldOptions(row) {
   const condType = row.querySelector(".cond-type")?.value || "like";
   const queryableColumns = condType === "range" ? getQueryableNumericColumns() : getQueryableColumns();
@@ -546,6 +594,7 @@ function refreshConditionFieldOptions(row) {
   fieldSelect.value = queryableColumns.includes(selected) ? selected : "";
 }
 
+/** 刷新排序规则的字段下拉选项 */
 function refreshSortFieldOptions(row) {
   const queryableColumns = getQueryableColumns();
   const fieldSelect = row.querySelector(".sort-field");
@@ -556,6 +605,7 @@ function refreshSortFieldOptions(row) {
   fieldSelect.value = queryableColumns.includes(selected) ? selected : "";
 }
 
+/** 统一刷新所有筛选/排序的字段选择器 */
 function refreshFieldSelectors() {
   Array.from(els.filters.querySelectorAll(".condition-row")).forEach((row) => {
     refreshConditionFieldOptions(row);
@@ -566,6 +616,7 @@ function refreshFieldSelectors() {
   refreshStats();
 }
 
+/** 切换筛选条件输入模式：模糊 / 数值范围 */
 function updateConditionInputMode(row) {
   const type = row.querySelector(".cond-type").value;
   const likeWrap = row.querySelector(".cond-like-wrap");
@@ -579,6 +630,7 @@ function updateConditionInputMode(row) {
   }
 }
 
+/** 更新筛选条件逻辑：第一条无 AND/OR */
 function updateConditionLogicState() {
   const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
   rows.forEach((row, idx) => {
@@ -595,6 +647,7 @@ function updateConditionLogicState() {
   });
 }
 
+/** 添加一条筛选条件行 */
 function addConditionRow(defaultData = null) {
   const data = defaultData || { logic: "AND", field: "", type: "like", value: "", min: "", max: "" };
   const row = document.createElement("div");
@@ -656,6 +709,7 @@ function addConditionRow(defaultData = null) {
   updateConditionLogicState();
 }
 
+/** 添加一条排序规则行 */
 function addSortRow(defaultData = null) {
   const data = defaultData || { field: "", order: "asc" };
   const row = document.createElement("div");
@@ -684,6 +738,8 @@ function addSortRow(defaultData = null) {
   els.sortRules.appendChild(row);
 }
 
+// ===================== 查询参数收集 =====================
+/** 收集所有筛选条件 */
 function collectConditions() {
   const rows = Array.from(els.filters.querySelectorAll(".condition-row"));
   const conditions = [];
@@ -710,6 +766,7 @@ function collectConditions() {
   return conditions;
 }
 
+/** 收集所有排序规则 */
 function collectSortRules() {
   const rows = Array.from(els.sortRules.querySelectorAll(".sort-row"));
   const rules = [];
@@ -735,6 +792,8 @@ function collectPayload() {
   };
 }
 
+// ===================== 表格渲染与查询 =====================
+/** 渲染结果表格 */
 function renderTable(columns, rows) {
   if (!columns || columns.length === 0) {
     clearTableView("暂无可见字段");
@@ -792,6 +851,7 @@ async function doQuery() {
   }
 }
 
+/** Excel 导入 */
 async function doImport() {
   const file = els.excelFile.files?.[0];
   if (!file) {
@@ -855,6 +915,8 @@ async function doExport() {
   }
 }
 
+// ===================== 事件绑定 =====================
+/** 绑定回车触发查询 */
 function bindEnterToQuery() {
   [els.globalKeyword].forEach((el) => {
     el.addEventListener("keydown", async (e) => {
@@ -874,9 +936,11 @@ function bindEnterToQuery() {
   });
 }
 
+/** 绑定所有页面交互事件 */
 function bindEvents() {
   els.importBtn.onclick = doImport;
 
+  // 创建文件夹
   els.createFolderBtn.onclick = async () => {
     try {
       const created = await createFolder(els.newFolderPath.value || "");
@@ -888,12 +952,14 @@ function bindEvents() {
     }
   };
 
+  // 回车创建文件夹
   els.newFolderPath.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     els.createFolderBtn.click();
   });
 
+  // 移动弹窗关闭
   els.moveModalCloseBtn.onclick = closeMoveModal;
   els.moveCancelBtn.onclick = closeMoveModal;
   els.moveModal.addEventListener("click", (e) => {
@@ -901,6 +967,7 @@ function bindEvents() {
     if (e.target.dataset.modalClose === "1") closeMoveModal();
   });
 
+  // 移动弹窗内新建文件夹
   els.moveCreateFolderBtn.onclick = async () => {
     try {
       const created = await createFolder(els.moveNewFolderInput.value || "");
@@ -913,27 +980,32 @@ function bindEvents() {
     }
   };
 
+  // 移动弹窗回车创建文件夹
   els.moveNewFolderInput.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     els.moveCreateFolderBtn.click();
   });
 
+  // 确认移动
   els.moveConfirmBtn.onclick = submitMove;
   els.moveFolderSelect.onchange = () => {
     if (els.moveNewFolderInput.value.trim()) return;
     setMessage(els.moveModalMsg, "");
   };
 
+  // ESC 关闭移动弹窗
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !els.moveModal.classList.contains("hidden")) {
       closeMoveModal();
     }
   });
 
+  // 添加筛选/排序
   els.addFilterBtn.onclick = () => addConditionRow();
   els.addSortBtn.onclick = () => addSortRow();
 
+  // 隐藏选中字段
   els.hideSelectedBtn.onclick = async () => {
     const selected = Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value);
     if (!selected.length) {
@@ -947,6 +1019,7 @@ function bindEvents() {
     await doQuery();
   };
 
+  // 取消隐藏选中字段
   els.unhideSelectedBtn.onclick = async () => {
     const selected = new Set(Array.from(els.hiddenColumns.selectedOptions).map((x) => x.value));
     if (!selected.size) {
@@ -960,6 +1033,7 @@ function bindEvents() {
     await doQuery();
   };
 
+  // 清空所有隐藏
   els.clearHiddenBtn.onclick = async () => {
     setHiddenColumns([]);
     refreshHiddenColumnsPanel();
@@ -968,6 +1042,7 @@ function bindEvents() {
     await doQuery();
   };
 
+  // 查询/重置/导出
   els.searchBtn.onclick = async () => {
     state.page = 1;
     await doQuery();
@@ -985,6 +1060,7 @@ function bindEvents() {
 
   els.exportBtn.onclick = doExport;
 
+  // 分页
   els.prevBtn.onclick = async () => {
     if (state.page <= 1) return;
     state.page -= 1;
@@ -1005,6 +1081,7 @@ function bindEvents() {
   bindEnterToQuery();
 }
 
+// ===================== 初始化 =====================
 async function init() {
   bindEvents();
   addConditionRow();
@@ -1014,14 +1091,5 @@ async function init() {
   if (state.currentTable) await doQuery();
 }
 
+// 启动页面
 init();
-
-
-
-
-
-
-
-
-
-
