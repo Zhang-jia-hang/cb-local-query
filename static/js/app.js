@@ -11,6 +11,8 @@
   lastRows: [],
   lastColumns: [],
   querying: false,
+  moveTargetTable: "",
+  moveTargetDisplayName: "",
 };
 
 const els = {
@@ -22,6 +24,16 @@ const els = {
   tableCountBadge: document.getElementById("tableCountBadge"),
   newFolderPath: document.getElementById("newFolderPath"),
   createFolderBtn: document.getElementById("createFolderBtn"),
+
+  moveModal: document.getElementById("moveModal"),
+  moveModalTitle: document.getElementById("moveModalTitle"),
+  moveModalCloseBtn: document.getElementById("moveModalCloseBtn"),
+  moveFolderSelect: document.getElementById("moveFolderSelect"),
+  moveNewFolderInput: document.getElementById("moveNewFolderInput"),
+  moveCreateFolderBtn: document.getElementById("moveCreateFolderBtn"),
+  moveConfirmBtn: document.getElementById("moveConfirmBtn"),
+  moveCancelBtn: document.getElementById("moveCancelBtn"),
+  moveModalMsg: document.getElementById("moveModalMsg"),
 
   currentTableTag: document.getElementById("currentTableTag"),
   currentFolderTag: document.getElementById("currentFolderTag"),
@@ -56,6 +68,7 @@ const els = {
 };
 
 function setMessage(el, text, isError = false) {
+  if (!el) return;
   el.textContent = text || "";
   el.className = `text-sm mt-2 ${isError ? "text-red-600" : "text-slate-600"}`;
 }
@@ -89,6 +102,14 @@ function refreshHeaderTags() {
   const meta = currentTableMeta();
   els.currentTableTag.textContent = meta ? `当前表：${meta.display_name}` : "当前表：未选择";
   els.currentFolderTag.textContent = meta ? `文件夹：${meta.folder_path || "未分组"}` : "文件夹：-";
+}
+
+function normalizeFolderPathClient(path) {
+  return String(path || "")
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 function getHiddenColumns() {
@@ -169,11 +190,21 @@ async function fetchJson(url, options = {}) {
   return null;
 }
 
+async function createFolder(path) {
+  const normalized = normalizeFolderPathClient(path);
+  if (!normalized) throw new Error("请输入有效的文件夹路径");
+
+  await fetchJson("/api/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_path: normalized }),
+  });
+
+  return normalized;
+}
+
 async function loadTableData() {
-  const [tableData, recycleData] = await Promise.all([
-    fetchJson("/api/tables"),
-    fetchJson("/api/recycle-bin"),
-  ]);
+  const [tableData, recycleData] = await Promise.all([fetchJson("/api/tables"), fetchJson("/api/recycle-bin")]);
 
   state.tables = tableData.tables || [];
   state.folders = tableData.folders || [];
@@ -242,6 +273,76 @@ function renderTableManager() {
   refreshHeaderTags();
 }
 
+function openMoveModal(table) {
+  state.moveTargetTable = table.table_name;
+  state.moveTargetDisplayName = table.display_name || table.table_name;
+
+  els.moveModalTitle.textContent = `移动数据表：${state.moveTargetDisplayName}`;
+  setMessage(els.moveModalMsg, "");
+  els.moveNewFolderInput.value = "";
+
+  const selectedFolder = normalizeFolderPathClient(table.folder_path || "");
+  renderMoveFolderOptions(selectedFolder);
+
+  els.moveModal.classList.remove("hidden");
+  els.moveModal.setAttribute("aria-hidden", "false");
+}
+
+function closeMoveModal() {
+  els.moveModal.classList.add("hidden");
+  els.moveModal.setAttribute("aria-hidden", "true");
+  state.moveTargetTable = "";
+  state.moveTargetDisplayName = "";
+  els.moveNewFolderInput.value = "";
+  setMessage(els.moveModalMsg, "");
+}
+
+function renderMoveFolderOptions(selectedFolder = "") {
+  const selected = normalizeFolderPathClient(selectedFolder);
+  const folders = [...new Set(state.folders.map((f) => normalizeFolderPathClient(f)).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "zh-CN")
+  );
+
+  els.moveFolderSelect.innerHTML = "";
+  els.moveFolderSelect.appendChild(createOption("", "未分组（根目录）"));
+  folders.forEach((f) => {
+    els.moveFolderSelect.appendChild(createOption(f, f));
+  });
+  els.moveFolderSelect.value = selected;
+}
+
+async function submitMove() {
+  if (!state.moveTargetTable) {
+    setMessage(els.moveModalMsg, "未找到要移动的数据表", true);
+    return;
+  }
+
+  let targetFolder = normalizeFolderPathClient(els.moveNewFolderInput.value || "");
+
+  try {
+    if (targetFolder) {
+      targetFolder = await createFolder(targetFolder);
+      await loadTableData();
+      renderMoveFolderOptions(targetFolder);
+      els.moveFolderSelect.value = targetFolder;
+    } else {
+      targetFolder = normalizeFolderPathClient(els.moveFolderSelect.value || "");
+    }
+
+    await fetchJson(`/api/table/${encodeURIComponent(state.moveTargetTable)}/move`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder_path: targetFolder }),
+    });
+
+    await loadTableData();
+    setMessage(els.importMsg, `移动成功：${state.moveTargetDisplayName} -> ${targetFolder || "未分组"}`);
+    closeMoveModal();
+  } catch (err) {
+    setMessage(els.moveModalMsg, err.message || "移动失败", true);
+  }
+}
+
 function renderTableRow(table) {
   const row = document.createElement("div");
   row.className = "table-manage-row";
@@ -287,21 +388,7 @@ function renderTableRow(table) {
   moveBtn.type = "button";
   moveBtn.className = "btn btn-mini";
   moveBtn.textContent = "移动";
-  moveBtn.onclick = async () => {
-    const folder = window.prompt("输入目标文件夹路径（多级用 /，留空移动到未分组）", table.folder_path || "");
-    if (folder === null) return;
-    try {
-      await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/move`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder_path: folder }),
-      });
-      await loadTableData();
-      setMessage(els.importMsg, "移动成功");
-    } catch (err) {
-      setMessage(els.importMsg, err.message || "移动失败", true);
-    }
-  };
+  moveBtn.onclick = () => openMoveModal(table);
 
   const delBtn = document.createElement("button");
   delBtn.type = "button";
@@ -773,24 +860,58 @@ function bindEvents() {
   els.importBtn.onclick = doImport;
 
   els.createFolderBtn.onclick = async () => {
-    const path = (els.newFolderPath.value || "").trim();
-    if (!path) {
-      setMessage(els.importMsg, "请输入文件夹路径", true);
-      return;
-    }
     try {
-      await fetchJson("/api/folders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder_path: path }),
-      });
+      const created = await createFolder(els.newFolderPath.value || "");
       els.newFolderPath.value = "";
       await loadTableData();
-      setMessage(els.importMsg, "文件夹创建成功");
+      setMessage(els.importMsg, `文件夹创建成功：${created}`);
     } catch (err) {
       setMessage(els.importMsg, err.message || "创建文件夹失败", true);
     }
   };
+
+  els.newFolderPath.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    els.createFolderBtn.click();
+  });
+
+  els.moveModalCloseBtn.onclick = closeMoveModal;
+  els.moveCancelBtn.onclick = closeMoveModal;
+  els.moveModal.addEventListener("click", (e) => {
+    if (!(e.target instanceof HTMLElement)) return;
+    if (e.target.dataset.modalClose === "1") closeMoveModal();
+  });
+
+  els.moveCreateFolderBtn.onclick = async () => {
+    try {
+      const created = await createFolder(els.moveNewFolderInput.value || "");
+      await loadTableData();
+      renderMoveFolderOptions(created);
+      els.moveFolderSelect.value = created;
+      setMessage(els.moveModalMsg, `文件夹创建成功：${created}`);
+    } catch (err) {
+      setMessage(els.moveModalMsg, err.message || "创建文件夹失败", true);
+    }
+  };
+
+  els.moveNewFolderInput.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    els.moveCreateFolderBtn.click();
+  });
+
+  els.moveConfirmBtn.onclick = submitMove;
+  els.moveFolderSelect.onchange = () => {
+    if (els.moveNewFolderInput.value.trim()) return;
+    setMessage(els.moveModalMsg, "");
+  };
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !els.moveModal.classList.contains("hidden")) {
+      closeMoveModal();
+    }
+  });
 
   els.addFilterBtn.onclick = () => addConditionRow();
   els.addSortBtn.onclick = () => addSortRow();
@@ -876,3 +997,5 @@ async function init() {
 }
 
 init();
+
+
