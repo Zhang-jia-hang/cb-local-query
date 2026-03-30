@@ -23,7 +23,8 @@ MAX_PAGE_SIZE = 200
 
 META_TABLE = "__table_meta"
 FOLDER_TABLE = "__folder_meta"
-SYSTEM_TABLES = {META_TABLE, FOLDER_TABLE}
+COLUMN_META_TABLE = "__column_meta"
+SYSTEM_TABLES = {META_TABLE, FOLDER_TABLE, COLUMN_META_TABLE}
 
 _IDENTIFIER_SAFE_RE = re.compile(r"[^0-9A-Za-z_\u4e00-\u9fff]")
 
@@ -84,6 +85,17 @@ def create_system_tables() -> None:
             )
             """
         )
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {COLUMN_META_TABLE} (
+                table_name TEXT NOT NULL,
+                column_name TEXT NOT NULL,
+                is_numeric INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (table_name, column_name)
+            )
+            """
+        )
         conn.commit()
 
 
@@ -96,6 +108,7 @@ def list_physical_tables() -> list[str]:
 
 
 def sync_table_metadata() -> None:
+    # 保持元数据与实际 SQLite 表同步，避免界面出现脏数据或孤儿记录。
     physical = set(list_physical_tables())
     now = now_str()
 
@@ -112,6 +125,7 @@ def sync_table_metadata() -> None:
         stale = sorted(meta_names - physical)
         for t in stale:
             conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (t,))
+            conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (t,))
 
         conn.commit()
 
@@ -159,6 +173,7 @@ def ensure_folder(path: str) -> None:
     if not normalized:
         return
 
+    # 按层级补齐父级目录，确保多级文件夹路径可被正确识别与展示。
     parts = normalized.split("/")
     now = now_str()
     curr = ""
@@ -246,6 +261,7 @@ def purge_table(table_name: str) -> None:
     with get_conn() as conn:
         conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
         conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (table_name,))
+        conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (table_name,))
         conn.commit()
 
 
@@ -253,6 +269,68 @@ def get_columns(table_name: str) -> list[str]:
     with get_conn() as conn:
         rows = conn.execute(f"PRAGMA table_info({_quote_ident(table_name)})").fetchall()
     return [r["name"] for r in rows]
+
+
+def _is_numeric_series(series: pd.Series) -> bool:
+    cleaned = series.dropna()
+    if cleaned.empty:
+        return False
+    parsed = pd.to_numeric(cleaned, errors="coerce")
+    return bool(parsed.notna().all())
+
+
+def _save_column_meta(
+    conn: sqlite3.Connection,
+    table_name: str,
+    columns: list[str],
+    numeric_columns: set[str],
+    created_at: str,
+) -> None:
+    conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (table_name,))
+    conn.executemany(
+        f"INSERT INTO {COLUMN_META_TABLE} (table_name, column_name, is_numeric, created_at) VALUES (?, ?, ?, ?)",
+        [(table_name, c, 1 if c in numeric_columns else 0, created_at) for c in columns],
+    )
+
+
+def _infer_numeric_columns_from_table(table_name: str, columns: list[str]) -> set[str]:
+    numeric: set[str] = set()
+    if not columns:
+        return numeric
+
+    with get_conn() as conn:
+        for col in columns:
+            rows = conn.execute(
+                f"SELECT {_quote_ident(col)} AS v FROM {_quote_ident(table_name)} WHERE TRIM(CAST({_quote_ident(col)} AS TEXT)) <> '' LIMIT 1000"
+            ).fetchall()
+            if not rows:
+                continue
+            values = [r["v"] for r in rows]
+            if all(_to_float(v) is not None for v in values):
+                numeric.add(col)
+    return numeric
+
+
+def get_numeric_columns(table_name: str, columns: list[str] | None = None) -> set[str]:
+    ensure_ready()
+    cols = columns or get_columns(table_name)
+    if not cols:
+        return set()
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT column_name, is_numeric FROM {COLUMN_META_TABLE} WHERE table_name = ?",
+            (table_name,),
+        ).fetchall()
+        if rows:
+            known = {r["column_name"] for r in rows if int(r["is_numeric"]) == 1}
+            return {c for c in known if c in cols}
+
+    inferred = _infer_numeric_columns_from_table(table_name, cols)
+    with get_conn() as conn:
+        _save_column_meta(conn, table_name, cols, inferred, now_str())
+        conn.commit()
+    return inferred
 
 
 def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
@@ -268,24 +346,31 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
             table_name = _normalize_identifier(sheet, fallback)
             original_name = table_name
             suffix = 1
+            # 处理与现有表名、同次导入工作表名的冲突，生成唯一表名。
             while table_name in used_names:
                 suffix += 1
                 table_name = f"{original_name}_{suffix}"
 
-            df = pd.read_excel(xls, sheet_name=sheet, dtype=str)
+            df = pd.read_excel(xls, sheet_name=sheet)
+            src_columns = list(df.columns)
+            src_numeric_flags = [_is_numeric_series(df[c]) for c in src_columns]
             df = df.fillna("")
 
             cols: list[str] = []
+            numeric_cols: set[str] = set()
             seen_cols: set[str] = set()
-            for cidx, col in enumerate(df.columns, start=1):
+            for cidx, col in enumerate(src_columns, start=1):
                 col_name = _normalize_identifier(str(col), f"col_{cidx}")
                 candidate = col_name
                 csuffix = 1
+                # 字段名规范化后若重复，追加后缀保证唯一性。
                 while candidate in seen_cols:
                     csuffix += 1
                     candidate = f"{col_name}_{csuffix}"
                 seen_cols.add(candidate)
                 cols.append(candidate)
+                if src_numeric_flags[cidx - 1]:
+                    numeric_cols.add(candidate)
 
             df.columns = cols
             df.to_sql(table_name, conn, if_exists="replace", index=False)
@@ -295,6 +380,7 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
                 f"INSERT OR REPLACE INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, COALESCE((SELECT folder_path FROM {META_TABLE} WHERE table_name = ?), ''), 0, NULL, COALESCE((SELECT created_at FROM {META_TABLE} WHERE table_name = ?), ?))",
                 (table_name, sheet, table_name, table_name, now),
             )
+            _save_column_meta(conn, table_name, cols, numeric_cols, now)
             created.append({"sheet": sheet, "table": table_name})
 
         conn.commit()
@@ -334,7 +420,11 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def build_conditions_clause(columns: list[str], conditions: list[dict[str, Any]]) -> tuple[str, list[Any]]:
+def build_conditions_clause(
+    columns: list[str],
+    numeric_columns: set[str],
+    conditions: list[dict[str, Any]],
+) -> tuple[str, list[Any]]:
     if not conditions:
         return "", []
 
@@ -354,6 +444,8 @@ def build_conditions_clause(columns: list[str], conditions: list[dict[str, Any]]
         expr_params: list[Any] = []
 
         if ctype == "range":
+            if field not in numeric_columns:
+                raise ValueError(f"范围查询字段必须为数值类型: {field}")
             min_v = _to_float(cond.get("min"))
             max_v = _to_float(cond.get("max"))
             qfield = f"CAST({_quote_ident(field)} AS REAL)"
@@ -380,6 +472,7 @@ def build_conditions_clause(columns: list[str], conditions: list[dict[str, Any]]
             logic = "AND"
 
         if not expr_parts:
+            # 第一个条件前不拼接 AND/OR 连接符。
             expr_parts.append(f"({expr})")
         else:
             expr_parts.append(f" {logic} ({expr})")
@@ -432,11 +525,13 @@ def build_order_clause(
 
 def build_where_clause(
     query_columns: list[str],
+    numeric_columns: set[str],
     global_keyword: str,
     conditions: list[dict[str, Any]],
 ) -> tuple[str, list[Any]]:
+    # 全局关键词与结构化条件均为可选，存在时按 AND 组合。
     global_expr, global_params = build_global_clause(query_columns, global_keyword)
-    cond_expr, cond_params = build_conditions_clause(query_columns, conditions)
+    cond_expr, cond_params = build_conditions_clause(query_columns, numeric_columns, conditions)
 
     parts: list[str] = []
     params: list[Any] = []
@@ -478,13 +573,15 @@ def query_table(
     query_columns = apply_hidden_columns(all_columns, hidden_columns)
     if not query_columns:
         raise ValueError("all columns are hidden")
+    numeric_columns = get_numeric_columns(table, all_columns)
 
-    where_clause, params = build_where_clause(query_columns, global_keyword, conditions)
+    where_clause, params = build_where_clause(query_columns, numeric_columns, global_keyword, conditions)
     order_clause = build_order_clause(query_columns, sort_rules, sort_field, sort_order)
     select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
     safe_page = max(1, page)
     safe_size = min(MAX_PAGE_SIZE, max(1, page_size))
+    # 使用 LIMIT/OFFSET 分页，保证翻页行为稳定。
     offset = (safe_page - 1) * safe_size
 
     with get_conn() as conn:
@@ -523,8 +620,9 @@ def fetch_all_rows_for_export(
     query_columns = apply_hidden_columns(all_columns, hidden_columns)
     if not query_columns:
         raise ValueError("all columns are hidden")
+    numeric_columns = get_numeric_columns(table, all_columns)
 
-    where_clause, params = build_where_clause(query_columns, global_keyword, conditions)
+    where_clause, params = build_where_clause(query_columns, numeric_columns, global_keyword, conditions)
     order_clause = build_order_clause(query_columns, sort_rules, sort_field, sort_order)
     select_clause = ", ".join(_quote_ident(c) for c in query_columns)
 
@@ -561,6 +659,7 @@ def export_query_to_excel(table: str, payload: dict[str, Any]) -> tuple[str, byt
     )
 
     visible_columns = payload.get("visible_columns") or []
+    # 若前端传入可见列，则按当前界面可见列导出。
     if isinstance(visible_columns, list) and visible_columns:
         export_columns = [c for c in columns if c in visible_columns]
         if not export_columns:
@@ -608,7 +707,9 @@ def create_app() -> Flask:
     def api_columns(table: str):
         try:
             assert_active_table(table)
-            return jsonify({"columns": get_columns(table)})
+            cols = get_columns(table)
+            numeric_cols = sorted(get_numeric_columns(table, cols))
+            return jsonify({"columns": cols, "numeric_columns": numeric_cols})
         except ValueError as ex:
             return jsonify({"error": str(ex)}), 404
 
@@ -750,6 +851,7 @@ def run_app() -> None:
     url = f"http://{host}:{port}"
 
     def open_browser_later() -> None:
+        # 稍作延迟，避免 Flask 尚未监听端口时浏览器提前打开。
         time.sleep(1.2)
         webbrowser.open(url)
 

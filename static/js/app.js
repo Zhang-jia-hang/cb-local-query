@@ -3,6 +3,7 @@
   recycleBin: [],
   folders: [],
   columns: [],
+  numericColumns: [],
   hiddenColumnsByTable: {},
   currentTable: "",
   page: 1,
@@ -104,6 +105,7 @@ function refreshHeaderTags() {
   els.currentFolderTag.textContent = meta ? `文件夹：${meta.folder_path || "未分组"}` : "文件夹：-";
 }
 
+// 与后端保持一致的路径规范化，确保目录相关接口入参统一。
 function normalizeFolderPathClient(path) {
   return String(path || "")
     .trim()
@@ -129,6 +131,11 @@ function setHiddenColumns(columns) {
 function getQueryableColumns() {
   const hidden = new Set(getHiddenColumns());
   return state.columns.filter((c) => !hidden.has(c));
+}
+
+function getQueryableNumericColumns() {
+  const queryable = new Set(getQueryableColumns());
+  return state.numericColumns.filter((c) => queryable.has(c));
 }
 
 function refreshStats() {
@@ -311,6 +318,7 @@ function renderMoveFolderOptions(selectedFolder = "") {
   els.moveFolderSelect.value = selected;
 }
 
+// 移动弹窗支持两种流程：选择已有文件夹，或新建后立即移动。
 async function submitMove() {
   if (!state.moveTargetTable) {
     setMessage(els.moveModalMsg, "未找到要移动的数据表", true);
@@ -483,6 +491,7 @@ function renderRecycleBin() {
 async function loadColumns() {
   if (!state.currentTable) {
     state.columns = [];
+    state.numericColumns = [];
     refreshFieldSelectors();
     refreshHiddenColumnsPanel();
     refreshHeaderTags();
@@ -492,8 +501,10 @@ async function loadColumns() {
   try {
     const data = await fetchJson(`/api/table/${encodeURIComponent(state.currentTable)}/columns`);
     state.columns = data.columns || [];
+    state.numericColumns = data.numeric_columns || [];
   } catch {
     state.columns = [];
+    state.numericColumns = [];
   }
 
   const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
@@ -525,11 +536,12 @@ function refreshHiddenColumnsPanel() {
 }
 
 function refreshConditionFieldOptions(row) {
-  const queryableColumns = getQueryableColumns();
+  const condType = row.querySelector(".cond-type")?.value || "like";
+  const queryableColumns = condType === "range" ? getQueryableNumericColumns() : getQueryableColumns();
   const fieldSelect = row.querySelector(".cond-field");
   const selected = fieldSelect.value;
   fieldSelect.innerHTML = "";
-  fieldSelect.appendChild(createOption("", "选择字段"));
+  fieldSelect.appendChild(createOption("", queryableColumns.length ? "选择字段" : "无可用字段"));
   queryableColumns.forEach((col) => fieldSelect.appendChild(createOption(col, col)));
   fieldSelect.value = queryableColumns.includes(selected) ? selected : "";
 }
@@ -630,7 +642,10 @@ function addConditionRow(defaultData = null) {
   row.querySelector(".cond-min").value = data.min || "";
   row.querySelector(".cond-max").value = data.max || "";
 
-  row.querySelector(".cond-type").onchange = () => updateConditionInputMode(row);
+  row.querySelector(".cond-type").onchange = () => {
+    updateConditionInputMode(row);
+    refreshConditionFieldOptions(row);
+  };
   row.querySelector(".cond-remove").onclick = () => {
     row.remove();
     updateConditionLogicState();
@@ -707,6 +722,7 @@ function collectSortRules() {
   return rules;
 }
 
+// 请求体结构与后端 /api/query 协议保持一致。
 function collectPayload() {
   return {
     table: state.currentTable,
@@ -737,6 +753,7 @@ function renderTable(columns, rows) {
   els.resultTable.innerHTML = `${thead}${tbody}`;
 }
 
+// 查询结果负责统一更新表格、总数与分页状态。
 async function doQuery() {
   const payload = collectPayload();
   if (!payload.table) {
@@ -797,6 +814,7 @@ async function doImport() {
   }
 }
 
+// 导出复用当前筛选/排序状态，并按当前可见列导出。
 async function doExport() {
   const payload = collectPayload();
   if (!payload.table) {
@@ -997,5 +1015,13 @@ async function init() {
 }
 
 init();
+
+
+
+
+
+
+
+
 
 
