@@ -18,7 +18,7 @@
         <p class="text-sm text-slate-600">支持文件夹、回收站、重命名、多条件查询</p>
       </section>
 
-      <section class="card mb-3">
+      <section class="card mb-3 table-manage-card">
         <div class="section-head mb-2">
           <h2 class="text-lg font-semibold">数据表管理</h2>
           <span class="badge" id="tableCountBadge">0</span>
@@ -32,20 +32,21 @@
         <div id="tableList" class="table-list mb-2">
           <p class="table-empty">暂无数据表</p>
         </div>
-
-        <details class="card-lite" open>
-          <summary>回收站</summary>
-          <div id="recycleList" class="recycle-list">
-            <p class="table-empty">回收站为空</p>
-          </div>
-        </details>
       </section>
 
       <section class="card side-card">
         <div class="import-box no-border-top">
-          <label class="label">导入 Excel 文件</label>
-          <input id="excelFile" type="file" accept=".xlsx,.xls" class="input" />
-          <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
+          <div class="section-head mb-2">
+            <label class="label m-0">导入 Excel 文件</label>
+            <span class="chip">多工作表自动建表</span>
+          </div>
+          <div class="upload-shell">
+            <input id="excelFile" type="file" accept=".xlsx,.xls" class="input upload-input" />
+          </div>
+          <div class="import-actions">
+            <button id="recycleToggleBtn" class="btn recycle-toggle" type="button">回收站</button>
+            <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
+          </div>
           <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
         </div>
       </section>
@@ -163,7 +164,19 @@
     </div>
   </div>
 
+  <div id="recycleModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-mask" data-recycle-close="1"></div>
+    <div class="modal-panel recycle-modal-panel" role="dialog" aria-modal="true" aria-labelledby="recycleModalTitle">
+      <div class="section-head mb-2">
+        <h3 id="recycleModalTitle" class="text-lg font-semibold">回收站</h3>
+        <button id="recycleCloseBtn" class="btn btn-mini" type="button">关闭</button>
+      </div>
+      <div id="recycleList" class="recycle-list recycle-list-modal">
+        <p class="table-empty">回收站为空</p>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/js/app.js"></script>
 </body>
 </html>
-

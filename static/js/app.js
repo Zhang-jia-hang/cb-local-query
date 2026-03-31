@@ -17,6 +17,14 @@ const state = {
   moveTargetDisplayName: "",  // 待移动表的显示名
 };
 
+let activeActionMenu = null;
+
+function closeActionMenu() {
+  if (!activeActionMenu) return;
+  activeActionMenu.classList.add("hidden");
+  activeActionMenu = null;
+}
+
 // ===================== DOM 元素缓存：统一管理页面所有节点 =====================
 const els = {
   excelFile: document.getElementById("excelFile"),
@@ -27,6 +35,9 @@ const els = {
   tableCountBadge: document.getElementById("tableCountBadge"),
   newFolderPath: document.getElementById("newFolderPath"),
   createFolderBtn: document.getElementById("createFolderBtn"),
+  recycleToggleBtn: document.getElementById("recycleToggleBtn"),
+  recycleCloseBtn: document.getElementById("recycleCloseBtn"),
+  recycleModal: document.getElementById("recycleModal"),
 
   moveModal: document.getElementById("moveModal"),
   moveModalTitle: document.getElementById("moveModalTitle"),
@@ -249,59 +260,93 @@ async function loadTableData() {
 
 // ===================== 左侧表格/文件夹/回收站渲染 =====================
 /** 渲染左侧表格管理面板（分组展示） */
+function folderIcon() {
+  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V9.7a2.2 2.2 0 0 1 2.2-2.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+}
+
+function tableIcon() {
+  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8.5 9.5v10M13.5 9.5v10" stroke="currentColor" stroke-width="1.6"/></svg></span>`;
+}
+
+function createFolderNode(name = "", path = "") {
+  return { name, path, children: new Map(), tables: [] };
+}
+
+function buildFolderTree() {
+  const root = createFolderNode("", "");
+
+  function ensurePath(fullPath) {
+    const normalized = normalizeFolderPathClient(fullPath);
+    if (!normalized) return root;
+    const parts = normalized.split("/");
+    let curr = root;
+    let currPath = "";
+    parts.forEach((part) => {
+      currPath = currPath ? `${currPath}/${part}` : part;
+      if (!curr.children.has(part)) {
+        curr.children.set(part, createFolderNode(part, currPath));
+      }
+      curr = curr.children.get(part);
+    });
+    return curr;
+  }
+
+  state.folders.forEach((f) => ensurePath(f));
+  state.tables.forEach((t) => {
+    const node = ensurePath(t.folder_path || "");
+    node.tables.push(t);
+  });
+
+  return root;
+}
+
+function renderFolderTreeNode(node, depth = 0) {
+  const frag = document.createDocumentFragment();
+
+  if (depth > 0) {
+    const title = document.createElement("div");
+    title.className = "folder-title tree-title";
+    title.style.paddingLeft = `${(depth - 1) * 14}px`;
+    title.innerHTML = `${folderIcon()}<span>${escapeHtml(node.name)}</span>`;
+    frag.appendChild(title);
+  }
+
+  node.tables
+    .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
+    .forEach((t) => frag.appendChild(renderTableRow(t, depth)));
+
+  Array.from(node.children.values())
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
+    .forEach((child) => frag.appendChild(renderFolderTreeNode(child, depth + 1)));
+
+  return frag;
+}
+
+/** 渲染左侧表格管理面板（多级文件夹树） */
 function renderTableManager() {
   els.tableCountBadge.textContent = String(state.tables.length);
-
-  const groupMap = new Map();
-  const root = "";
-  groupMap.set(root, []);
-
-  // 初始化所有文件夹分组
-  state.folders.forEach((f) => {
-    if (!groupMap.has(f)) groupMap.set(f, []);
-  });
-  // 数据表按文件夹分组
-  state.tables.forEach((t) => {
-    const folder = t.folder_path || "";
-    if (!groupMap.has(folder)) groupMap.set(folder, []);
-    groupMap.get(folder).push(t);
-  });
-
-  // 文件夹排序
-  const folders = Array.from(groupMap.keys()).sort((a, b) => {
-    if (a === "") return -1;
-    if (b === "") return 1;
-    return a.localeCompare(b, "zh-CN");
-  });
+  const root = buildFolderTree();
 
   els.tableList.innerHTML = "";
-  if (!state.tables.length && folders.length <= 1) {
+  const hasFolders = root.children.size > 0;
+  const hasRootTables = root.tables.length > 0;
+
+  if (!hasFolders && !hasRootTables) {
     els.tableList.innerHTML = "<p class='table-empty'>暂无数据表</p>";
   } else {
-    folders.forEach((folder) => {
-      const tables = groupMap.get(folder) || [];
+    if (hasRootTables) {
+      const rootTitle = document.createElement("div");
+      rootTitle.className = "folder-title tree-title";
+      rootTitle.innerHTML = `${folderIcon()}<span>未分组</span>`;
+      els.tableList.appendChild(rootTitle);
+      root.tables
+        .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
+        .forEach((t) => els.tableList.appendChild(renderTableRow(t, 1)));
+    }
 
-      const group = document.createElement("div");
-      group.className = "folder-group";
-
-      const title = document.createElement("div");
-      title.className = "folder-title";
-      title.textContent = folder || "未分组";
-      group.appendChild(title);
-
-      if (!tables.length) {
-        const empty = document.createElement("div");
-        empty.className = "folder-empty";
-        empty.textContent = "(空文件夹)";
-        group.appendChild(empty);
-      } else {
-        tables
-          .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
-          .forEach((t) => group.appendChild(renderTableRow(t)));
-      }
-
-      els.tableList.appendChild(group);
-    });
+    Array.from(root.children.values())
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
+      .forEach((child) => els.tableList.appendChild(renderFolderTreeNode(child, 1)));
   }
 
   renderRecycleBin();
@@ -385,16 +430,16 @@ async function submitMove() {
   }
 }
 
-/** 渲染单张数据表行（选择、重命名、移动、删除） */
-function renderTableRow(table) {
+/** 渲染单张数据表行（选择 + 更多操作菜单） */
+function renderTableRow(table, depth = 0) {
   const row = document.createElement("div");
   row.className = "table-manage-row";
 
-  // 选择表按钮
   const selectBtn = document.createElement("button");
   selectBtn.type = "button";
   selectBtn.className = `table-item${state.currentTable === table.table_name ? " active" : ""}`;
-  selectBtn.textContent = table.display_name;
+  selectBtn.innerHTML = `${tableIcon()}<span class="table-label">${escapeHtml(table.display_name)}</span>`;
+  selectBtn.style.paddingLeft = `${Math.max(0, depth - 1) * 14 + 8}px`;
   selectBtn.title = `${table.display_name} [${table.table_name}]`;
   selectBtn.onclick = async () => {
     state.currentTable = table.table_name;
@@ -404,25 +449,32 @@ function renderTableRow(table) {
     await doQuery();
   };
 
-  // 操作按钮组
   const actions = document.createElement("div");
-  actions.className = "row-actions";
+  actions.className = "row-actions compact-actions";
 
-  // 重命名
+  const moreBtn = document.createElement("button");
+  moreBtn.type = "button";
+  moreBtn.className = "btn btn-mini action-more-btn";
+  moreBtn.textContent = "···";
+  moreBtn.title = "更多操作";
+
+  const menu = document.createElement("div");
+  menu.className = "action-menu hidden";
+
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
-  renameBtn.className = "btn btn-mini";
+  renameBtn.className = "action-menu-item";
   renameBtn.textContent = "重命名";
   renameBtn.onclick = async () => {
     const name = window.prompt("请输入新表名（显示名）", table.display_name || "");
-    if (name === null) return;
-    if (!name.trim()) return;
+    if (name === null || !name.trim()) return;
     try {
       await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/rename`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ display_name: name.trim() }),
       });
+      closeActionMenu();
       await loadTableData();
       setMessage(els.importMsg, "重命名成功");
     } catch (err) {
@@ -430,26 +482,26 @@ function renderTableRow(table) {
     }
   };
 
-  // 移动
   const moveBtn = document.createElement("button");
   moveBtn.type = "button";
-  moveBtn.className = "btn btn-mini";
+  moveBtn.className = "action-menu-item";
   moveBtn.textContent = "移动";
-  moveBtn.onclick = () => openMoveModal(table);
+  moveBtn.onclick = () => {
+    closeActionMenu();
+    openMoveModal(table);
+  };
 
-  // 删除（软删除）
   const delBtn = document.createElement("button");
   delBtn.type = "button";
-  delBtn.className = "btn btn-danger btn-mini";
+  delBtn.className = "action-menu-item danger";
   delBtn.textContent = "删除";
   delBtn.onclick = async () => {
     const ok = window.confirm(`确认删除【${table.display_name}】到回收站吗？`);
     if (!ok) return;
     try {
       await fetchJson(`/api/table/${encodeURIComponent(table.table_name)}/delete`, { method: "POST" });
-      if (state.currentTable === table.table_name) {
-        state.currentTable = "";
-      }
+      if (state.currentTable === table.table_name) state.currentTable = "";
+      closeActionMenu();
       await loadTableData();
       await loadColumns();
       state.page = 1;
@@ -464,16 +516,26 @@ function renderTableRow(table) {
     }
   };
 
-  actions.appendChild(renameBtn);
-  actions.appendChild(moveBtn);
-  actions.appendChild(delBtn);
+  menu.appendChild(renameBtn);
+  menu.appendChild(moveBtn);
+  menu.appendChild(delBtn);
+
+  moreBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (activeActionMenu && activeActionMenu !== menu) activeActionMenu.classList.add("hidden");
+    menu.classList.toggle("hidden");
+    activeActionMenu = menu.classList.contains("hidden") ? null : menu;
+  };
+
+  actions.appendChild(moreBtn);
+  actions.appendChild(menu);
 
   row.appendChild(selectBtn);
   row.appendChild(actions);
   return row;
 }
 
-/** 渲染回收站列表 */
+/** 渲染回收站列表 */ */
 function renderRecycleBin() {
   els.recycleList.innerHTML = "";
   if (!state.recycleBin.length) {
@@ -487,7 +549,7 @@ function renderRecycleBin() {
 
     const txt = document.createElement("div");
     txt.className = "recycle-name";
-    txt.textContent = `${t.display_name} (${t.folder_path || "未分组"})`;
+    txt.innerHTML = `${tableIcon()}<span>${escapeHtml(t.display_name)} (${escapeHtml(t.folder_path || "未分组")})</span>`;
 
     const acts = document.createElement("div");
     acts.className = "row-actions";
@@ -940,6 +1002,28 @@ function bindEnterToQuery() {
 function bindEvents() {
   els.importBtn.onclick = doImport;
 
+  if (els.recycleToggleBtn && els.recycleModal) {
+    els.recycleToggleBtn.onclick = () => {
+      els.recycleModal.classList.remove("hidden");
+      els.recycleModal.setAttribute("aria-hidden", "false");
+    };
+  }
+  if (els.recycleCloseBtn && els.recycleModal) {
+    els.recycleCloseBtn.onclick = () => {
+      els.recycleModal.classList.add("hidden");
+      els.recycleModal.setAttribute("aria-hidden", "true");
+    };
+  }
+  if (els.recycleModal) {
+    els.recycleModal.addEventListener("click", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      if (e.target.dataset.recycleClose === "1") {
+        els.recycleModal.classList.add("hidden");
+        els.recycleModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+
   // 创建文件夹
   els.createFolderBtn.onclick = async () => {
     try {
@@ -994,11 +1078,21 @@ function bindEvents() {
     setMessage(els.moveModalMsg, "");
   };
 
-  // ESC 关闭移动弹窗
+  // ESC 关闭弹窗/菜单
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !els.moveModal.classList.contains("hidden")) {
       closeMoveModal();
     }
+    if (e.key === "Escape" && els.recycleModal && !els.recycleModal.classList.contains("hidden")) {
+      els.recycleModal.classList.add("hidden");
+      els.recycleModal.setAttribute("aria-hidden", "true");
+    }
+    if (e.key === "Escape") closeActionMenu();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!(e.target instanceof HTMLElement)) return;
+    if (!e.target.closest(".compact-actions")) closeActionMenu();
   });
 
   // 添加筛选/排序
@@ -1093,3 +1187,4 @@ async function init() {
 
 // 启动页面
 init();
+
