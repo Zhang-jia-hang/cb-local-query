@@ -95,6 +95,7 @@ const els = {
 
   globalKeyword: document.getElementById("globalKeyword"),
   pageSize: document.getElementById("pageSize"),
+  pageSizeBottom: document.getElementById("pageSizeBottom"),
 
   sortRules: document.getElementById("sortRules"),
   addSortBtn: document.getElementById("addSortBtn"),
@@ -115,8 +116,11 @@ const els = {
   queryMsg: document.getElementById("queryMsg"),
   resultTable: document.getElementById("resultTable"),
   prevBtn: document.getElementById("prevBtn"),
+  prevBtnBottom: document.getElementById("prevBtnBottom"),
   nextBtn: document.getElementById("nextBtn"),
+  nextBtnBottom: document.getElementById("nextBtnBottom"),
   pageInfo: document.getElementById("pageInfo"),
+  pageInfoBottom: document.getElementById("pageInfoBottom"),
 };
 
 // ===================== 通用工具函数 =====================
@@ -133,7 +137,9 @@ function setQueryBusy(busy) {
   els.searchBtn.disabled = busy;
   els.exportBtn.disabled = busy;
   els.prevBtn.disabled = busy;
+  if (els.prevBtnBottom) els.prevBtnBottom.disabled = busy;
   els.nextBtn.disabled = busy;
+  if (els.nextBtnBottom) els.nextBtnBottom.disabled = busy;
   els.searchBtn.textContent = busy ? "查询中..." : "查询";
 }
 
@@ -146,9 +152,17 @@ function createOption(value, label) {
 }
 
 /** 清空结果表格，显示空数据提示 */
+function syncPagerState() {
+  const pageSizeValue = String(els.pageSize?.value || "20");
+  if (els.pageSizeBottom) els.pageSizeBottom.value = pageSizeValue;
+  const pageText = state.total ? `第 ${state.page} / ${state.totalPages} 页，共 ${state.total} 条` : "";
+  if (els.pageInfo) els.pageInfo.textContent = pageText;
+  if (els.pageInfoBottom) els.pageInfoBottom.textContent = pageText;
+}
 function clearTableView(message = "暂无数据") {
   els.resultTable.innerHTML = `<tr><td class='p-3'>${message}</td></tr>`;
-  els.pageInfo.textContent = "";
+  if (els.pageInfo) els.pageInfo.textContent = "";
+  if (els.pageInfoBottom) els.pageInfoBottom.textContent = "";
 }
 
 /** 获取当前选中表的元数据 */
@@ -1269,7 +1283,7 @@ async function doQuery() {
     state.lastRows = data.rows || [];
 
     renderTable(state.lastColumns, state.lastRows);
-    els.pageInfo.textContent = `第 ${state.page} / ${state.totalPages} 页，共 ${state.total} 条`;
+    syncPagerState();
     setMessage(els.queryMsg, "查询完成");
   } catch (err) {
     setMessage(els.queryMsg, err.message || "查询失败", true);
@@ -1592,22 +1606,40 @@ function bindEvents() {
   els.exportBtn.onclick = doExport;
 
   // 分页
-  els.prevBtn.onclick = async () => {
+  const goPrevPage = async () => {
     if (state.page <= 1) return;
     state.page -= 1;
     await doQuery();
   };
 
-  els.nextBtn.onclick = async () => {
+  const goNextPage = async () => {
     if (state.page >= state.totalPages) return;
     state.page += 1;
     await doQuery();
   };
 
-  els.pageSize.onchange = async () => {
+  const onPageSizeChange = async (value) => {
+    if (els.pageSize) els.pageSize.value = value;
+    if (els.pageSizeBottom) els.pageSizeBottom.value = value;
     state.page = 1;
     await doQuery();
   };
+
+  els.prevBtn.onclick = goPrevPage;
+  if (els.prevBtnBottom) els.prevBtnBottom.onclick = goPrevPage;
+
+  els.nextBtn.onclick = goNextPage;
+  if (els.nextBtnBottom) els.nextBtnBottom.onclick = goNextPage;
+
+  els.pageSize.onchange = async () => {
+    await onPageSizeChange(String(els.pageSize.value || "20"));
+  };
+
+  if (els.pageSizeBottom) {
+    els.pageSizeBottom.onchange = async () => {
+      await onPageSizeChange(String(els.pageSizeBottom.value || "20"));
+    };
+  }
 
   bindEnterToQuery();
 }
@@ -1625,6 +1657,11 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
+
+
 
 
 

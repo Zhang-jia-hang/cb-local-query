@@ -102,9 +102,12 @@
       </section>
 
       <section class="card result-card">
-        <div class="section-head mb-3">
-          <h2 class="text-lg font-semibold">查询结果</h2>
-          <div class="flex items-center gap-2 flex-wrap">
+        <div class="result-toolbar result-toolbar-top">
+          <div class="result-toolbar-title">
+            <h2 class="text-lg font-semibold">查询结果</h2>
+            <span id="pageInfo" class="text-sm"></span>
+          </div>
+          <div class="result-pager-actions">
             <label class="label-inline">每页条数</label>
             <select id="pageSize" class="input page-size-select">
               <option value="10">10</option>
@@ -112,14 +115,28 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
-            <button id="prevBtn" class="btn">上一页</button>
-            <span id="pageInfo" class="text-sm"></span>
-            <button id="nextBtn" class="btn">下一页</button>
+            <button id="prevBtn" class="btn" type="button">上一页</button>
+            <button id="nextBtn" class="btn" type="button">下一页</button>
           </div>
         </div>
 
-        <div class="table-wrap">
+        <div class="table-wrap result-table-wrap">
           <table id="resultTable" class="table"></table>
+        </div>
+
+        <div class="result-toolbar result-toolbar-bottom">
+          <div id="pageInfoBottom" class="result-pager-summary text-sm"></div>
+          <div class="result-pager-actions">
+            <label class="label-inline">每页条数</label>
+            <select id="pageSizeBottom" class="input page-size-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            <button id="prevBtnBottom" class="btn" type="button">上一页</button>
+            <button id="nextBtnBottom" class="btn" type="button">下一页</button>
+          </div>
         </div>
       </section>
     </main>
@@ -248,6 +265,7 @@
 
 </body>
 </html>
+
 
 
 
