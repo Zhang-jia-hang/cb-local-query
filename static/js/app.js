@@ -1417,6 +1417,21 @@ function bindEvents() {
       }
     });
   }
+  if (els.recyclePurgeAllBtn) {
+    els.recyclePurgeAllBtn.onclick = async () => {
+      const totalDeleted = state.recycleBin.length + state.recycleFolders.length;
+      if (!totalDeleted) return;
+      const ok = window.confirm(`确认清空回收站吗？共 ${totalDeleted} 个已删除文件将被彻底删除，且不可恢复。`);
+      if (!ok) return;
+      try {
+        const data = await fetchJson("/api/recycle-bin/purge-all", { method: "DELETE" });
+        await loadTableData();
+        setMessage(els.importMsg, `回收站已清空：删除 ${data.table_count || 0} 张表，${data.folder_count || 0} 个文件夹`);
+      } catch (err) {
+        setMessage(els.importMsg, err.message || "清空回收站失败", true);
+      }
+    };
+  }
 
   // 新建文件夹弹窗
   if (els.folderCreateToggleBtn) {
@@ -1610,6 +1625,7 @@ async function init() {
 
 // 启动页面
 init();
+
 
 
 

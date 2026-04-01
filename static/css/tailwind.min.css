@@ -843,3 +843,50 @@ body {
   color: #35557d;
   font-weight: 600;
 }
+
+.app-shell {
+  display: flex;
+}
+
+.sidebar {
+  padding: .4rem;
+}
+
+.main-content {
+  margin-left: var(--sidebar-w);
+  width: calc(100% - var(--sidebar-w));
+  padding: .4rem 0 .4rem .0rem;
+  display: grid;
+  gap: 0;
+}
+
+.main-content .card {
+  margin: 0;
+  border-radius: 8px;
+}
+
+.query-card {
+  margin-bottom: 0 !important;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.result-card {
+  margin-top: -1px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.table-manage-card {
+  margin-bottom: 0 !important;
+  height: calc(100vh - .8rem);
+}
+
+.card {
+  padding: .5rem;
+}
+
+.mb-3,
+.mb-4 {
+  margin-bottom: 0 !important;
+}
