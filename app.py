@@ -107,7 +107,9 @@ def create_system_tables() -> None:
             f"""
             CREATE TABLE IF NOT EXISTS {FOLDER_TABLE} (
                 folder_path TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
             )
             """
         )
@@ -123,6 +125,11 @@ def create_system_tables() -> None:
             )
             """
         )
+        folder_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({FOLDER_TABLE})").fetchall()}
+        if "is_deleted" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        if "deleted_at" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN deleted_at TEXT")
         conn.commit()
 
 # ===================== 表同步与元数据维护 =====================
@@ -161,6 +168,11 @@ def sync_table_metadata() -> None:
             conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (t,))
             conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (t,))
 
+        folder_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({FOLDER_TABLE})").fetchall()}
+        if "is_deleted" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        if "deleted_at" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN deleted_at TEXT")
         conn.commit()
 
 def ensure_ready() -> None:
@@ -195,16 +207,20 @@ def list_tables(include_deleted: bool = False) -> list[dict[str, Any]]:
 
     return [dict(r) for r in rows]
 
-def list_folders() -> list[str]:
-    """获取所有文件夹路径"""
+def list_folders(include_deleted: bool = False) -> list[str]:
+    """获取文件夹路径列表（默认不包含已删除文件夹）"""
     ensure_ready()
+    sql = f"SELECT folder_path FROM {FOLDER_TABLE}"
+    if not include_deleted:
+        sql += " WHERE is_deleted = 0"
+    sql += " ORDER BY folder_path"
     with get_conn() as conn:
-        rows = conn.execute(f"SELECT folder_path FROM {FOLDER_TABLE} ORDER BY folder_path").fetchall()
+        rows = conn.execute(sql).fetchall()
     return [r["folder_path"] for r in rows]
 
 def ensure_folder(path: str) -> None:
     """
-    确保多级文件夹路径存在（自动创建父级）
+    确保多级文件夹路径存在（自动创建父级），若目录在回收站中则一并恢复。
     例如传入 a/b/c → 自动创建 a、a/b、a/b/c
     """
     normalized = normalize_folder_path(path)
@@ -218,8 +234,12 @@ def ensure_folder(path: str) -> None:
         for p in parts:
             curr = p if not curr else f"{curr}/{p}"
             conn.execute(
-                f"INSERT OR IGNORE INTO {FOLDER_TABLE} (folder_path, created_at) VALUES (?, ?)",
+                f"INSERT OR IGNORE INTO {FOLDER_TABLE} (folder_path, created_at, is_deleted, deleted_at) VALUES (?, ?, 0, NULL)",
                 (curr, now),
+            )
+            conn.execute(
+                f"UPDATE {FOLDER_TABLE} SET is_deleted = 0, deleted_at = NULL WHERE folder_path = ?",
+                (curr,),
             )
         conn.commit()
 
@@ -234,6 +254,10 @@ def create_folder(path: str) -> str:
 
 def _folder_descendant_pattern(path: str) -> str:
     return f"{path}/%"
+
+
+def _folder_path_matches_sql() -> str:
+    return "(folder_path = ? OR folder_path LIKE ?)"
 
 
 def rename_folder(old_path: str, new_path: str) -> str:
@@ -252,7 +276,7 @@ def rename_folder(old_path: str, new_path: str) -> str:
     ensure_ready()
     with get_conn() as conn:
         existing = conn.execute(
-            f"SELECT folder_path, created_at FROM {FOLDER_TABLE} WHERE folder_path = ? OR folder_path LIKE ? ORDER BY folder_path",
+            f"SELECT folder_path, created_at FROM {FOLDER_TABLE} WHERE {_folder_path_matches_sql()} AND is_deleted = 0 ORDER BY folder_path",
             (old_norm, _folder_descendant_pattern(old_norm)),
         ).fetchall()
         if not existing:
@@ -261,13 +285,10 @@ def rename_folder(old_path: str, new_path: str) -> str:
         ensure_folder("/".join(new_norm.split("/")[:-1]))
 
         affected = [(r["folder_path"], r["created_at"]) for r in existing]
-        transformed = {
-            old: new_norm + old[len(old_norm):]
-            for old, _created in affected
-        }
+        transformed = {old: new_norm + old[len(old_norm):] for old, _created in affected}
 
         conflicts = conn.execute(
-            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE folder_path = ? OR folder_path LIKE ?",
+            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE {_folder_path_matches_sql()} AND is_deleted = 0",
             (new_norm, _folder_descendant_pattern(new_norm)),
         ).fetchall()
         conflict_paths = {r["folder_path"] for r in conflicts}
@@ -275,7 +296,7 @@ def rename_folder(old_path: str, new_path: str) -> str:
             raise ValueError("target folder already exists")
 
         table_rows = conn.execute(
-            f"SELECT table_name, folder_path FROM {META_TABLE} WHERE folder_path = ? OR folder_path LIKE ?",
+            f"SELECT table_name, folder_path FROM {META_TABLE} WHERE {_folder_path_matches_sql()}",
             (old_norm, _folder_descendant_pattern(old_norm)),
         ).fetchall()
 
@@ -284,7 +305,7 @@ def rename_folder(old_path: str, new_path: str) -> str:
             [(old,) for old, _created in reversed(affected)],
         )
         conn.executemany(
-            f"INSERT OR REPLACE INTO {FOLDER_TABLE} (folder_path, created_at) VALUES (?, ?)",
+            f"INSERT OR REPLACE INTO {FOLDER_TABLE} (folder_path, created_at, is_deleted, deleted_at) VALUES (?, ?, 0, NULL)",
             [(transformed[old], created) for old, created in affected],
         )
 
@@ -300,37 +321,132 @@ def rename_folder(old_path: str, new_path: str) -> str:
     return new_norm
 
 
-def delete_folder(path: str) -> None:
-    """删除空文件夹；若存在子文件夹或数据表，则拒绝删除。"""
+def get_folder_summary(path: str, include_deleted: bool = False) -> dict[str, Any]:
+    """获取文件夹子树摘要，用于删除提示和回收站展示。"""
     normalized = normalize_folder_path(path)
     if not normalized:
         raise ValueError("invalid folder path")
 
     ensure_ready()
     with get_conn() as conn:
-        row = conn.execute(
-            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE folder_path = ?",
-            (normalized,),
-        ).fetchone()
-        if not row:
-            raise ValueError("folder not found")
+        folder_sql = f"SELECT folder_path FROM {FOLDER_TABLE} WHERE {_folder_path_matches_sql()}"
+        table_sql = f"SELECT table_name, display_name, folder_path FROM {META_TABLE} WHERE {_folder_path_matches_sql()}"
+        params = (normalized, _folder_descendant_pattern(normalized))
+        if not include_deleted:
+            folder_sql += " AND is_deleted = 0"
+            table_sql += " AND is_deleted = 0"
+        folder_sql += " ORDER BY folder_path"
+        table_sql += " ORDER BY folder_path, display_name"
+        folder_rows = conn.execute(folder_sql, params).fetchall()
+        table_rows = conn.execute(table_sql, params).fetchall()
 
-        child_folder = conn.execute(
-            f"SELECT 1 FROM {FOLDER_TABLE} WHERE folder_path LIKE ? LIMIT 1",
-            (_folder_descendant_pattern(normalized),),
-        ).fetchone()
-        if child_folder:
-            raise ValueError("folder is not empty")
+    if not folder_rows:
+        raise ValueError("folder not found")
 
-        child_table = conn.execute(
-            f"SELECT 1 FROM {META_TABLE} WHERE folder_path = ? LIMIT 1",
-            (normalized,),
-        ).fetchone()
-        if child_table:
-            raise ValueError("folder is not empty")
+    return {
+        "folder_path": normalized,
+        "folders": [r["folder_path"] for r in folder_rows],
+        "tables": [dict(r) for r in table_rows],
+        "folder_count": len(folder_rows),
+        "table_count": len(table_rows),
+    }
 
-        conn.execute(f"DELETE FROM {FOLDER_TABLE} WHERE folder_path = ?", (normalized,))
+
+def list_recycle_folders() -> list[dict[str, Any]]:
+    """获取回收站中的顶级已删除文件夹及其摘要。"""
+    ensure_ready()
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT folder_path, deleted_at FROM {FOLDER_TABLE} WHERE is_deleted = 1 ORDER BY folder_path"
+        ).fetchall()
+
+    deleted_paths = {r["folder_path"] for r in rows}
+    root_rows = []
+    for row in rows:
+        parts = row["folder_path"].split("/")
+        has_deleted_parent = any("/".join(parts[:i]) in deleted_paths for i in range(1, len(parts)))
+        if not has_deleted_parent:
+            root_rows.append(row)
+
+    items: list[dict[str, Any]] = []
+    for row in root_rows:
+        summary = get_folder_summary(row["folder_path"], include_deleted=True)
+        items.append(
+            {
+                "folder_path": row["folder_path"],
+                "deleted_at": row["deleted_at"],
+                "folder_count": summary["folder_count"],
+                "table_count": summary["table_count"],
+                "folders": summary["folders"],
+                "tables": summary["tables"],
+            }
+        )
+    return items
+
+
+def delete_folder(path: str) -> dict[str, Any]:
+    """软删除文件夹子树：目录移出左侧列表，目录中的表进入回收站。"""
+    summary = get_folder_summary(path, include_deleted=False)
+    normalized = summary["folder_path"]
+    now = now_str()
+
+    with get_conn() as conn:
+        params = (normalized, _folder_descendant_pattern(normalized))
+        conn.execute(
+            f"UPDATE {FOLDER_TABLE} SET is_deleted = 1, deleted_at = ? WHERE {_folder_path_matches_sql()} AND is_deleted = 0",
+            (now, *params),
+        )
+        conn.execute(
+            f"UPDATE {META_TABLE} SET is_deleted = 1, deleted_at = ? WHERE {_folder_path_matches_sql()} AND is_deleted = 0",
+            (now, *params),
+        )
         conn.commit()
+
+    return summary
+
+
+def restore_folder(path: str) -> dict[str, Any]:
+    """从回收站恢复整个文件夹子树及其中已删除的数据表。"""
+    summary = get_folder_summary(path, include_deleted=True)
+    normalized = summary["folder_path"]
+    with get_conn() as conn:
+        params = (normalized, _folder_descendant_pattern(normalized))
+        conn.execute(
+            f"UPDATE {FOLDER_TABLE} SET is_deleted = 0, deleted_at = NULL WHERE {_folder_path_matches_sql()}",
+            params,
+        )
+        conn.execute(
+            f"UPDATE {META_TABLE} SET is_deleted = 0, deleted_at = NULL WHERE {_folder_path_matches_sql()} AND is_deleted = 1",
+            params,
+        )
+        conn.commit()
+    ensure_folder(normalized)
+    return summary
+
+
+def purge_folder(path: str) -> dict[str, Any]:
+    """彻底删除回收站中的文件夹子树及其中所有已删除表。"""
+    summary = get_folder_summary(path, include_deleted=True)
+    normalized = summary["folder_path"]
+    with get_conn() as conn:
+        params = (normalized, _folder_descendant_pattern(normalized))
+        folders = conn.execute(
+            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE {_folder_path_matches_sql()} AND is_deleted = 1 ORDER BY folder_path DESC",
+            params,
+        ).fetchall()
+        tables = conn.execute(
+            f"SELECT table_name FROM {META_TABLE} WHERE {_folder_path_matches_sql()} AND is_deleted = 1",
+            params,
+        ).fetchall()
+        for row in tables:
+            table_name = row["table_name"]
+            conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+            conn.execute(f"DELETE FROM {META_TABLE} WHERE table_name = ?", (table_name,))
+            conn.execute(f"DELETE FROM {COLUMN_META_TABLE} WHERE table_name = ?", (table_name,))
+        for row in folders:
+            conn.execute(f"DELETE FROM {FOLDER_TABLE} WHERE folder_path = ?", (row["folder_path"],))
+        conn.commit()
+    return summary
 
 def rename_table_display(table_name: str, new_name: str) -> None:
     """修改表的显示名称（不修改物理表名）"""
@@ -379,7 +495,7 @@ def soft_delete_table(table_name: str) -> None:
         conn.commit()
 
 def restore_table(table_name: str) -> None:
-    """从回收站恢复表"""
+    """从回收站恢复表，同时确保所属文件夹重新可见。"""
     record = get_table_record(table_name)
     if not record:
         raise ValueError("table not found")
@@ -390,6 +506,8 @@ def restore_table(table_name: str) -> None:
             (table_name,),
         )
         conn.commit()
+
+    ensure_folder(record.get("folder_path") or "")
 
 def purge_table(table_name: str) -> None:
     """彻底删除表：删除物理表 + 删除所有元数据"""
@@ -473,6 +591,11 @@ def get_numeric_columns(table_name: str, columns: list[str] | None = None) -> se
     inferred = _infer_numeric_columns_from_table(table_name, cols)
     with get_conn() as conn:
         _save_column_meta(conn, table_name, cols, inferred, now_str())
+        folder_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({FOLDER_TABLE})").fetchall()}
+        if "is_deleted" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        if "deleted_at" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN deleted_at TEXT")
         conn.commit()
     return inferred
 
@@ -535,6 +658,11 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
             _save_column_meta(conn, table_name, cols, numeric_cols, now)
             created.append({"sheet": sheet, "table": table_name})
 
+        folder_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({FOLDER_TABLE})").fetchall()}
+        if "is_deleted" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+        if "deleted_at" not in folder_cols:
+            conn.execute(f"ALTER TABLE {FOLDER_TABLE} ADD COLUMN deleted_at TEXT")
         conn.commit()
 
     return {"created": created, "count": len(created)}
@@ -868,11 +996,12 @@ def create_app() -> Flask:
     def api_tables():
         return jsonify({"tables": list_tables(include_deleted=False), "folders": list_folders()})
 
-    # 回收站：已删除表
+    # 回收站：已删除表 + 已删除文件夹
     @app.get("/api/recycle-bin")
     def api_recycle_bin():
         items = [x for x in list_tables(include_deleted=True) if int(x["is_deleted"]) == 1]
-        return jsonify({"tables": items})
+        folders = list_recycle_folders()
+        return jsonify({"tables": items, "folders": folders})
 
     # 创建文件夹
     @app.post("/api/folders")
@@ -905,12 +1034,36 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         folder_path = payload.get("folder_path") or ""
         try:
-            delete_folder(folder_path)
-            return jsonify({"deleted": folder_path})
+            summary = delete_folder(folder_path)
+            return jsonify({"deleted": folder_path, "summary": summary})
         except ValueError as ex:
             return jsonify({"error": str(ex)}), 400
         except Exception as ex:
             return jsonify({"error": f"文件夹删除失败: {ex}"}), 500
+
+    @app.post("/api/folders/restore")
+    def api_restore_folder():
+        payload = request.get_json(silent=True) or {}
+        folder_path = payload.get("folder_path") or ""
+        try:
+            summary = restore_folder(folder_path)
+            return jsonify({"restored": folder_path, "summary": summary})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"文件夹恢复失败: {ex}"}), 500
+
+    @app.delete("/api/folders/purge")
+    def api_purge_folder():
+        payload = request.get_json(silent=True) or {}
+        folder_path = payload.get("folder_path") or ""
+        try:
+            summary = purge_folder(folder_path)
+            return jsonify({"purged": folder_path, "summary": summary})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"文件夹彻底删除失败: {ex}"}), 500
 
     # 获取表的列 + 数值列
     @app.get("/api/table/<table>/columns")
@@ -1080,3 +1233,10 @@ def run_app() -> None:
 # 主入口
 if __name__ == "__main__":
     run_app()
+
+
+
+
+
+
+

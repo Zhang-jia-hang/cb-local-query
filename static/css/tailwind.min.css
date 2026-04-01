@@ -46,7 +46,7 @@ body {
   bottom: 0;
   width: var(--sidebar-w);
   padding: .65rem;
-  overflow: hidden;
+  overflow: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -137,7 +137,7 @@ body {
   border-radius: 10px;
   padding: .42rem;
   max-height: 260px;
-  overflow: hidden;
+  overflow: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -687,4 +687,12 @@ body {
   color: #35557d;
   font-size: .9rem;
 }
+
+
+.folder-icon-empty { color: #91a6c6; }
+.folder-icon-filled { color: #4f78aa; }
+
+
+
+
 

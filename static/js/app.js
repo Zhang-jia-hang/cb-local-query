@@ -1,21 +1,22 @@
 ﻿// ===================== 全局状态管理：存储页面所有数据 =====================
 const state = {
   tables: [],                  // 数据表列表
-  recycleBin: [],              // 回收站（软删除表）
-  folders: [],                // 文件夹列表
-  columns: [],                // 当前表所有字段
-  numericColumns: [],         // 当前表数值类型字段
+  recycleBin: [],              // 回收站中的已删除数据表
+  folders: [],                 // 活跃文件夹列表
+  recycleFolders: [],          // 回收站中的已删除文件夹
+  columns: [],                 // 当前表所有字段
+  numericColumns: [],          // 当前表数值类型字段
   hiddenColumnsByTable: {},    // 按表存储隐藏字段
   currentTable: "",            // 当前选中的表名
-  page: 1,                    // 当前页码
-  totalPages: 1,              // 总页数
-  total: 0,                   // 数据总条数
-  lastRows: [],               // 上一次查询的数据行
-  lastColumns: [],            // 上一次查询的显示列
-  querying: false,            // 是否正在查询中（防重复提交）
+  page: 1,                     // 当前页码
+  totalPages: 1,               // 总页数
+  total: 0,                    // 数据总条数
+  lastRows: [],                // 上一次查询的数据行
+  lastColumns: [],             // 上一次查询的显示列
+  querying: false,             // 是否正在查询中（防重复提交）
   moveTargetTable: "",        // 待移动的表名
   moveTargetDisplayName: "",  // 待移动表的显示名
-  expandedFolders: new Set(), // 左侧已展开的文件夹路径
+  expandedFolders: new Set(),  // 左侧已展开的文件夹路径
   folderCreateParent: "",     // 当前新建文件夹的父目录
 };
 
@@ -313,7 +314,28 @@ async function renameFolder(oldPath, newPath) {
 async function deleteFolder(path) {
   const normalized = normalizeFolderPathClient(path);
   if (!normalized) throw new Error("无效的文件夹路径");
-  await fetchJson("/api/folders", {
+  const data = await fetchJson("/api/folders", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_path: normalized }),
+  });
+  return data.summary || { folder_count: 0, table_count: 0, folders: [], tables: [] };
+}
+
+async function restoreRecycleFolder(path) {
+  const normalized = normalizeFolderPathClient(path);
+  if (!normalized) throw new Error("无效的文件夹路径");
+  return fetchJson("/api/folders/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_path: normalized }),
+  });
+}
+
+async function purgeRecycleFolder(path) {
+  const normalized = normalizeFolderPathClient(path);
+  if (!normalized) throw new Error("无效的文件夹路径");
+  return fetchJson("/api/folders/purge", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ folder_path: normalized }),
@@ -340,8 +362,8 @@ async function loadTableData() {
   state.tables = tableData.tables || [];
   state.folders = tableData.folders || [];
   state.recycleBin = recycleData.tables || [];
+  state.recycleFolders = recycleData.folders || [];
 
-  // 当前表不存在时，自动选中第一个表
   if (!state.tables.find((t) => t.table_name === state.currentTable)) {
     state.currentTable = state.tables[0]?.table_name || "";
   }
@@ -351,8 +373,11 @@ async function loadTableData() {
 
 // ===================== 左侧表格/文件夹/回收站渲染 =====================
 /** 渲染左侧表格管理面板（分组展示） */
-function folderIcon() {
-  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V9.7a2.2 2.2 0 0 1 2.2-2.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+function folderIcon(hasContent = true) {
+  if (!hasContent) {
+    return `<span class="item-icon folder-icon-empty" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8.2a2.2 2.2 0 0 1 2.2-2.2h4.9l1.4 1.7H18a2 2 0 0 1 2 2v6.1a2.2 2.2 0 0 1-2.2 2.2H6.2A2.2 2.2 0 0 1 4 15.8V8.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+  }
+  return `<span class="item-icon folder-icon-filled" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V9.7a2.2 2.2 0 0 1 2.2-2.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
 }
 
 function tableIcon() {
@@ -367,6 +392,28 @@ function createFolderNode(name = "", path = "") {
   return { name, path, children: new Map(), tables: [] };
 }
 
+function getFolderImpactSummary(path) {
+  const normalized = normalizeFolderPathClient(path);
+  const folders = state.folders
+    .filter((f) => f === normalized || f.startsWith(`${normalized}/`))
+    .sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const tables = state.tables
+    .filter((t) => {
+      const folderPath = normalizeFolderPathClient(t.folder_path || "");
+      return folderPath === normalized || folderPath.startsWith(`${normalized}/`);
+    })
+    .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"));
+  return { folders, tables };
+}
+
+function buildFolderDeleteMessage(path) {
+  const summary = getFolderImpactSummary(path);
+  const folderNames = summary.folders.slice(0, 8).join("、") || "无";
+  const tableNames = summary.tables.slice(0, 8).map((t) => t.display_name || t.table_name).join("、") || "无";
+  const folderMore = summary.folders.length > 8 ? ` 等 ${summary.folders.length} 个文件夹` : "";
+  const tableMore = summary.tables.length > 8 ? ` 等 ${summary.tables.length} 张表` : "";
+  return `确认删除文件夹【${path}】吗？\n\n子文件夹：${summary.folders.length} 个\n涉及数据表：${summary.tables.length} 张\n\n文件夹：${folderNames}${folderMore}\n数据表：${tableNames}${tableMore}\n\n删除后会从左侧移除，数据表会进入回收站。`;
+}
 function buildFolderTree() {
   const root = createFolderNode("", "");
 
@@ -404,7 +451,8 @@ function makeFolderRow(node, depth) {
   titleBtn.type = "button";
   titleBtn.className = "folder-row-main";
   const expanded = isFolderExpanded(node.path);
-  titleBtn.innerHTML = `${chevronIcon(expanded)}${folderIcon()}<span class="table-label">${escapeHtml(node.name)}</span>`;
+  const hasContent = node.tables.length > 0 || node.children.size > 0;
+  titleBtn.innerHTML = `${chevronIcon(expanded)}${folderIcon(hasContent)}<span class="table-label">${escapeHtml(node.name)}</span>`;
   titleBtn.onclick = () => {
     setFolderExpanded(node.path, !isFolderExpanded(node.path));
     renderTableManager();
@@ -454,13 +502,13 @@ function makeFolderRow(node, depth) {
   deleteBtn.className = "action-menu-item danger";
   deleteBtn.textContent = "删除文件夹";
   deleteBtn.onclick = async () => {
-    const ok = window.confirm(`确认删除空文件夹【${node.path}】吗？`);
+    const ok = window.confirm(buildFolderDeleteMessage(node.path));
     if (!ok) return;
     try {
-      await deleteFolder(node.path);
+      const summary = await deleteFolder(node.path);
       closeActionMenu();
       await loadTableData();
-      setMessage(els.importMsg, "文件夹删除成功");
+      setMessage(els.importMsg, `文件夹删除成功：${summary.table_count} 张表已移入回收站`);
     } catch (err) {
       setMessage(els.importMsg, err.message || "文件夹删除失败", true);
     }
@@ -521,7 +569,7 @@ function renderTableManager() {
     if (hasRootTables) {
       const rootTitle = document.createElement("div");
       rootTitle.className = "folder-title tree-title root-tree-title";
-      rootTitle.innerHTML = `${folderIcon()}<span>未分组</span>`;
+      rootTitle.innerHTML = `${folderIcon(root.tables.length > 0)}<span>未分组</span>`;
       els.tableList.appendChild(rootTitle);
       root.tables
         .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
@@ -1394,6 +1442,16 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
+
+
+
+
+
+
+
 
 
 
