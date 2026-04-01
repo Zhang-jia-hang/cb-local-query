@@ -544,3 +544,127 @@ body {
 .recycle-list-modal {
   max-height: 58vh;
 }
+
+/* ===== Folder Tree And Stable Scrollbar ===== */
+.table-manage-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .45rem;
+}
+
+.toolbar-hint {
+  margin: 0;
+  font-size: .76rem;
+  color: #68809f;
+  text-align: right;
+}
+
+.folder-create-panel {
+  border: 1px solid #d5e1f2;
+  border-radius: 10px;
+  padding: .45rem;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+}
+
+.folder-create-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .45rem;
+  margin-bottom: .42rem;
+}
+
+.table-list,
+.recycle-list {
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.table-list {
+  padding-right: .3rem;
+}
+
+.table-manage-row,
+.recycle-row,
+.folder-row {
+  min-width: 0;
+}
+
+.folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .35rem;
+  align-items: center;
+  margin-bottom: .22rem;
+}
+
+.folder-row-main {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  color: #28486f;
+  padding: .38rem .45rem;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: all .18s ease;
+}
+
+.folder-row-main:hover {
+  border-color: #c9deff;
+  background: #eef5ff;
+}
+
+.folder-chevron {
+  width: 12px;
+  height: 12px;
+  color: #6f88aa;
+  flex: 0 0 12px;
+  line-height: 0;
+  transition: transform .18s ease;
+}
+
+.folder-chevron svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.folder-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.root-tree-title {
+  margin-bottom: .2rem;
+}
+
+.table-item,
+.folder-row-main,
+.recycle-name {
+  min-width: 0;
+}
+
+.table-item .table-label,
+.folder-row-main .table-label,
+.recycle-name span {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .table-manage-toolbar,
+  .folder-create-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-hint {
+    text-align: left;
+  }
+}
+

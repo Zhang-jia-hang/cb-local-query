@@ -15,6 +15,8 @@ const state = {
   querying: false,            // 是否正在查询中（防重复提交）
   moveTargetTable: "",        // 待移动的表名
   moveTargetDisplayName: "",  // 待移动表的显示名
+  expandedFolders: new Set(), // ???????????
+  folderCreateParent: "",     // ???????????
 };
 
 let activeActionMenu = null;
@@ -33,6 +35,10 @@ const els = {
   tableList: document.getElementById("tableList"),
   recycleList: document.getElementById("recycleList"),
   tableCountBadge: document.getElementById("tableCountBadge"),
+  folderCreateToggleBtn: document.getElementById("folderCreateToggleBtn"),
+  folderCreatePanel: document.getElementById("folderCreatePanel"),
+  folderCreateContext: document.getElementById("folderCreateContext"),
+  folderCreateCancelBtn: document.getElementById("folderCreateCancelBtn"),
   newFolderPath: document.getElementById("newFolderPath"),
   createFolderBtn: document.getElementById("createFolderBtn"),
   recycleToggleBtn: document.getElementById("recycleToggleBtn"),
@@ -126,6 +132,60 @@ function refreshHeaderTags() {
 }
 
 // 与后端保持一致的路径规范化，确保目录相关接口入参统一。
+function saveExpandedFolders() {
+  try {
+    localStorage.setItem("expandedFolders", JSON.stringify(Array.from(state.expandedFolders)));
+  } catch {}
+}
+
+function loadExpandedFolders() {
+  try {
+    const raw = localStorage.getItem("expandedFolders");
+    const items = raw ? JSON.parse(raw) : [];
+    state.expandedFolders = new Set(Array.isArray(items) ? items : []);
+  } catch {
+    state.expandedFolders = new Set();
+  }
+}
+
+function isFolderExpanded(path) {
+  return state.expandedFolders.has(normalizeFolderPathClient(path));
+}
+
+function setFolderExpanded(path, expanded) {
+  const normalized = normalizeFolderPathClient(path);
+  if (!normalized) return;
+  if (expanded) state.expandedFolders.add(normalized);
+  else state.expandedFolders.delete(normalized);
+  saveExpandedFolders();
+}
+
+function openFolderCreatePanel(parentPath = "") {
+  state.folderCreateParent = normalizeFolderPathClient(parentPath);
+  if (els.folderCreateContext) {
+    els.folderCreateContext.textContent = `新建位置：${state.folderCreateParent || "根目录"}`;
+  }
+  if (els.folderCreatePanel) els.folderCreatePanel.classList.remove("hidden");
+  if (els.newFolderPath) {
+    els.newFolderPath.value = "";
+    els.newFolderPath.focus();
+  }
+}
+
+function closeFolderCreatePanel() {
+  state.folderCreateParent = "";
+  if (els.folderCreatePanel) els.folderCreatePanel.classList.add("hidden");
+  if (els.folderCreateContext) els.folderCreateContext.textContent = "新建位置：根目录";
+  if (els.newFolderPath) els.newFolderPath.value = "";
+}
+
+function buildCreateFolderPath(inputPath) {
+  const normalized = normalizeFolderPathClient(inputPath);
+  if (!normalized) return "";
+  if (!state.folderCreateParent) return normalized;
+  if (normalized.includes("/")) return normalized;
+  return `${state.folderCreateParent}/${normalized}`;
+}
 function normalizeFolderPathClient(path) {
   return String(path || "")
     .trim()
@@ -228,6 +288,27 @@ async function fetchJson(url, options = {}) {
 }
 
 /** 创建文件夹（调用后端接口） */
+async function renameFolder(oldPath, newPath) {
+  const oldNorm = normalizeFolderPathClient(oldPath);
+  const newNorm = normalizeFolderPathClient(newPath);
+  if (!oldNorm || !newNorm) throw new Error("请输入有效的文件夹路径");
+  await fetchJson("/api/folders/rename", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old_path: oldNorm, new_path: newNorm }),
+  });
+  return newNorm;
+}
+
+async function deleteFolder(path) {
+  const normalized = normalizeFolderPathClient(path);
+  if (!normalized) throw new Error("无效的文件夹路径");
+  await fetchJson("/api/folders", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_path: normalized }),
+  });
+}
 async function createFolder(path) {
   const normalized = normalizeFolderPathClient(path);
   if (!normalized) throw new Error("请输入有效的文件夹路径");
@@ -268,6 +349,10 @@ function tableIcon() {
   return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8.5 9.5v10M13.5 9.5v10" stroke="currentColor" stroke-width="1.6"/></svg></span>`;
 }
 
+function chevronIcon(expanded) {
+  return `<span class="folder-chevron${expanded ? " expanded" : ""}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+}
+
 function createFolderNode(name = "", path = "") {
   return { name, path, children: new Map(), tables: [] };
 }
@@ -300,20 +385,104 @@ function buildFolderTree() {
   return root;
 }
 
+function makeFolderRow(node, depth) {
+  const row = document.createElement("div");
+  row.className = "folder-row";
+  row.style.paddingLeft = `${Math.max(0, depth - 1) * 14}px`;
+
+  const titleBtn = document.createElement("button");
+  titleBtn.type = "button";
+  titleBtn.className = "folder-row-main";
+  const expanded = isFolderExpanded(node.path);
+  titleBtn.innerHTML = `${chevronIcon(expanded)}${folderIcon()}<span class="table-label">${escapeHtml(node.name)}</span>`;
+  titleBtn.onclick = () => {
+    setFolderExpanded(node.path, !isFolderExpanded(node.path));
+    renderTableManager();
+  };
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions compact-actions";
+
+  const moreBtn = document.createElement("button");
+  moreBtn.type = "button";
+  moreBtn.className = "btn btn-mini action-more-btn";
+  moreBtn.textContent = "···";
+  moreBtn.title = "文件夹操作";
+
+  const menu = document.createElement("div");
+  menu.className = "action-menu hidden";
+
+  const createBtn = document.createElement("button");
+  createBtn.type = "button";
+  createBtn.className = "action-menu-item";
+  createBtn.textContent = "在此新建";
+  createBtn.onclick = () => {
+    closeActionMenu();
+    setFolderExpanded(node.path, true);
+    openFolderCreatePanel(node.path);
+  };
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "action-menu-item";
+  renameBtn.textContent = "重命名";
+  renameBtn.onclick = async () => {
+    const name = window.prompt("请输入新的文件夹路径", node.path);
+    if (name === null || !name.trim()) return;
+    try {
+      await renameFolder(node.path, name);
+      closeActionMenu();
+      await loadTableData();
+      setMessage(els.importMsg, "文件夹重命名成功");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "文件夹重命名失败", true);
+    }
+  };
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "action-menu-item danger";
+  deleteBtn.textContent = "删除文件夹";
+  deleteBtn.onclick = async () => {
+    const ok = window.confirm(`确认删除空文件夹【${node.path}】吗？`);
+    if (!ok) return;
+    try {
+      await deleteFolder(node.path);
+      closeActionMenu();
+      await loadTableData();
+      setMessage(els.importMsg, "文件夹删除成功");
+    } catch (err) {
+      setMessage(els.importMsg, err.message || "文件夹删除失败", true);
+    }
+  };
+
+  menu.appendChild(createBtn);
+  menu.appendChild(renameBtn);
+  menu.appendChild(deleteBtn);
+
+  moreBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (activeActionMenu && activeActionMenu !== menu) activeActionMenu.classList.add("hidden");
+    menu.classList.toggle("hidden");
+    activeActionMenu = menu.classList.contains("hidden") ? null : menu;
+  };
+
+  actions.appendChild(moreBtn);
+  actions.appendChild(menu);
+  row.appendChild(titleBtn);
+  row.appendChild(actions);
+  return row;
+}
+
 function renderFolderTreeNode(node, depth = 0) {
   const frag = document.createDocumentFragment();
+  frag.appendChild(makeFolderRow(node, depth));
 
-  if (depth > 0) {
-    const title = document.createElement("div");
-    title.className = "folder-title tree-title";
-    title.style.paddingLeft = `${(depth - 1) * 14}px`;
-    title.innerHTML = `${folderIcon()}<span>${escapeHtml(node.name)}</span>`;
-    frag.appendChild(title);
-  }
+  if (!isFolderExpanded(node.path)) return frag;
 
   node.tables
     .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "", "zh-CN"))
-    .forEach((t) => frag.appendChild(renderTableRow(t, depth)));
+    .forEach((t) => frag.appendChild(renderTableRow(t, depth + 1)));
 
   Array.from(node.children.values())
     .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
@@ -327,6 +496,11 @@ function renderTableManager() {
   els.tableCountBadge.textContent = String(state.tables.length);
   const root = buildFolderTree();
 
+  if (!state.expandedFolders.size) {
+    state.folders.forEach((f) => state.expandedFolders.add(normalizeFolderPathClient(f)));
+    saveExpandedFolders();
+  }
+
   els.tableList.innerHTML = "";
   const hasFolders = root.children.size > 0;
   const hasRootTables = root.tables.length > 0;
@@ -336,7 +510,7 @@ function renderTableManager() {
   } else {
     if (hasRootTables) {
       const rootTitle = document.createElement("div");
-      rootTitle.className = "folder-title tree-title";
+      rootTitle.className = "folder-title tree-title root-tree-title";
       rootTitle.innerHTML = `${folderIcon()}<span>未分组</span>`;
       els.tableList.appendChild(rootTitle);
       root.tables
@@ -535,7 +709,7 @@ function renderTableRow(table, depth = 0) {
   return row;
 }
 
-/** 渲染回收站列表 */ */
+/** 渲染回收站列表 */
 function renderRecycleBin() {
   els.recycleList.innerHTML = "";
   if (!state.recycleBin.length) {
@@ -1024,11 +1198,20 @@ function bindEvents() {
     });
   }
 
-  // 创建文件夹
+  // 左侧新建文件夹面板
+  if (els.folderCreateToggleBtn) {
+    els.folderCreateToggleBtn.onclick = () => openFolderCreatePanel("");
+  }
+  if (els.folderCreateCancelBtn) {
+    els.folderCreateCancelBtn.onclick = () => closeFolderCreatePanel();
+  }
+
   els.createFolderBtn.onclick = async () => {
     try {
-      const created = await createFolder(els.newFolderPath.value || "");
-      els.newFolderPath.value = "";
+      const created = await createFolder(buildCreateFolderPath(els.newFolderPath.value || ""));
+      if (state.folderCreateParent) setFolderExpanded(state.folderCreateParent, true);
+      setFolderExpanded(created, true);
+      closeFolderCreatePanel();
       await loadTableData();
       setMessage(els.importMsg, `文件夹创建成功：${created}`);
     } catch (err) {
@@ -1036,7 +1219,6 @@ function bindEvents() {
     }
   };
 
-  // 回车创建文件夹
   els.newFolderPath.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
@@ -1088,6 +1270,9 @@ function bindEvents() {
       els.recycleModal.setAttribute("aria-hidden", "true");
     }
     if (e.key === "Escape") closeActionMenu();
+    if (e.key === "Escape" && els.folderCreatePanel && !els.folderCreatePanel.classList.contains("hidden")) {
+      closeFolderCreatePanel();
+    }
   });
 
   document.addEventListener("click", (e) => {
@@ -1177,6 +1362,7 @@ function bindEvents() {
 
 // ===================== 初始化 =====================
 async function init() {
+  loadExpandedFolders();
   bindEvents();
   addConditionRow();
   addSortRow();
@@ -1187,4 +1373,17 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
+
+
+
+
+
+
+
+
+
+
 

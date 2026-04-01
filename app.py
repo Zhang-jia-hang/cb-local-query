@@ -231,6 +231,107 @@ def create_folder(path: str) -> str:
     ensure_folder(normalized)
     return normalized
 
+
+def _folder_descendant_pattern(path: str) -> str:
+    return f"{path}/%"
+
+
+def rename_folder(old_path: str, new_path: str) -> str:
+    """重命名文件夹，同时级联更新其子文件夹和表归属路径。"""
+    old_norm = normalize_folder_path(old_path)
+    new_norm = normalize_folder_path(new_path)
+    if not old_norm:
+        raise ValueError("invalid source folder path")
+    if not new_norm:
+        raise ValueError("invalid target folder path")
+    if old_norm == new_norm:
+        return new_norm
+    if new_norm.startswith(old_norm + "/"):
+        raise ValueError("target folder cannot be inside source folder")
+
+    ensure_ready()
+    with get_conn() as conn:
+        existing = conn.execute(
+            f"SELECT folder_path, created_at FROM {FOLDER_TABLE} WHERE folder_path = ? OR folder_path LIKE ? ORDER BY folder_path",
+            (old_norm, _folder_descendant_pattern(old_norm)),
+        ).fetchall()
+        if not existing:
+            raise ValueError("folder not found")
+
+        ensure_folder("/".join(new_norm.split("/")[:-1]))
+
+        affected = [(r["folder_path"], r["created_at"]) for r in existing]
+        transformed = {
+            old: new_norm + old[len(old_norm):]
+            for old, _created in affected
+        }
+
+        conflicts = conn.execute(
+            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE folder_path = ? OR folder_path LIKE ?",
+            (new_norm, _folder_descendant_pattern(new_norm)),
+        ).fetchall()
+        conflict_paths = {r["folder_path"] for r in conflicts}
+        if any(path not in transformed for path in conflict_paths):
+            raise ValueError("target folder already exists")
+
+        table_rows = conn.execute(
+            f"SELECT table_name, folder_path FROM {META_TABLE} WHERE folder_path = ? OR folder_path LIKE ?",
+            (old_norm, _folder_descendant_pattern(old_norm)),
+        ).fetchall()
+
+        conn.executemany(
+            f"DELETE FROM {FOLDER_TABLE} WHERE folder_path = ?",
+            [(old,) for old, _created in reversed(affected)],
+        )
+        conn.executemany(
+            f"INSERT OR REPLACE INTO {FOLDER_TABLE} (folder_path, created_at) VALUES (?, ?)",
+            [(transformed[old], created) for old, created in affected],
+        )
+
+        for row in table_rows:
+            new_folder = new_norm + row["folder_path"][len(old_norm):]
+            conn.execute(
+                f"UPDATE {META_TABLE} SET folder_path = ? WHERE table_name = ?",
+                (new_folder, row["table_name"]),
+            )
+
+        conn.commit()
+
+    return new_norm
+
+
+def delete_folder(path: str) -> None:
+    """删除空文件夹；若存在子文件夹或数据表，则拒绝删除。"""
+    normalized = normalize_folder_path(path)
+    if not normalized:
+        raise ValueError("invalid folder path")
+
+    ensure_ready()
+    with get_conn() as conn:
+        row = conn.execute(
+            f"SELECT folder_path FROM {FOLDER_TABLE} WHERE folder_path = ?",
+            (normalized,),
+        ).fetchone()
+        if not row:
+            raise ValueError("folder not found")
+
+        child_folder = conn.execute(
+            f"SELECT 1 FROM {FOLDER_TABLE} WHERE folder_path LIKE ? LIMIT 1",
+            (_folder_descendant_pattern(normalized),),
+        ).fetchone()
+        if child_folder:
+            raise ValueError("folder is not empty")
+
+        child_table = conn.execute(
+            f"SELECT 1 FROM {META_TABLE} WHERE folder_path = ? LIMIT 1",
+            (normalized,),
+        ).fetchone()
+        if child_table:
+            raise ValueError("folder is not empty")
+
+        conn.execute(f"DELETE FROM {FOLDER_TABLE} WHERE folder_path = ?", (normalized,))
+        conn.commit()
+
 def rename_table_display(table_name: str, new_name: str) -> None:
     """修改表的显示名称（不修改物理表名）"""
     record = get_table_record(table_name)
@@ -785,6 +886,31 @@ def create_app() -> Flask:
             return jsonify({"error": str(ex)}), 400
         except Exception as ex:
             return jsonify({"error": f"创建文件夹失败: {ex}"}), 500
+
+    @app.patch("/api/folders/rename")
+    def api_rename_folder():
+        payload = request.get_json(silent=True) or {}
+        old_path = payload.get("old_path") or ""
+        new_path = payload.get("new_path") or ""
+        try:
+            folder = rename_folder(old_path, new_path)
+            return jsonify({"folder": folder})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"文件夹重命名失败: {ex}"}), 500
+
+    @app.delete("/api/folders")
+    def api_delete_folder():
+        payload = request.get_json(silent=True) or {}
+        folder_path = payload.get("folder_path") or ""
+        try:
+            delete_folder(folder_path)
+            return jsonify({"deleted": folder_path})
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"文件夹删除失败: {ex}"}), 500
 
     # 获取表的列 + 数值列
     @app.get("/api/table/<table>/columns")

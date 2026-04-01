@@ -24,9 +24,20 @@
           <span class="badge" id="tableCountBadge">0</span>
         </div>
 
-        <div class="folder-create mb-2">
-          <input id="newFolderPath" class="input" placeholder="新建文件夹路径，如：财务/2026/Q1" />
-          <button id="createFolderBtn" class="btn">新建文件夹</button>
+        <div class="table-manage-toolbar mb-2">
+          <button id="folderCreateToggleBtn" class="btn btn-secondary" type="button">新建文件夹</button>
+          <p class="toolbar-hint">支持多级路径与当前文件夹下新建</p>
+        </div>
+
+        <div id="folderCreatePanel" class="folder-create-panel hidden mb-2">
+          <div class="folder-create-panel-head">
+            <span id="folderCreateContext" class="text-sm text-slate-600">新建位置：根目录</span>
+            <button id="folderCreateCancelBtn" class="btn btn-mini" type="button">取消</button>
+          </div>
+          <div class="folder-create">
+            <input id="newFolderPath" class="input" placeholder="例如：财务/2026/Q1 或 输入子目录名" />
+            <button id="createFolderBtn" class="btn">创建</button>
+          </div>
         </div>
 
         <div id="tableList" class="table-list mb-2">
@@ -180,3 +191,4 @@
   <script src="/static/js/app.js"></script>
 </body>
 </html>
+
