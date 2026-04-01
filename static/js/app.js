@@ -33,6 +33,16 @@ const els = {
   excelFile: document.getElementById("excelFile"),
   importBtn: document.getElementById("importBtn"),
   importMsg: document.getElementById("importMsg"),
+  importModal: document.getElementById("importModal"),
+  importCloseBtn: document.getElementById("importCloseBtn"),
+  importCancelBtn: document.getElementById("importCancelBtn"),
+  importConfirmBtn: document.getElementById("importConfirmBtn"),
+  importFolderSelect: document.getElementById("importFolderSelect"),
+  importModalMsg: document.getElementById("importModalMsg"),
+  importResultModal: document.getElementById("importResultModal"),
+  importResultBody: document.getElementById("importResultBody"),
+  importResultCloseBtn: document.getElementById("importResultCloseBtn"),
+  importResultConfirmBtn: document.getElementById("importResultConfirmBtn"),
   tableList: document.getElementById("tableList"),
   recycleList: document.getElementById("recycleList"),
   tableCountBadge: document.getElementById("tableCountBadge"),
@@ -381,7 +391,7 @@ function folderIcon(hasContent = true) {
 }
 
 function tableIcon() {
-  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8.5 9.5v10M13.5 9.5v10" stroke="currentColor" stroke-width="1.6"/></svg></span>`;
+  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="7" ry="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v4.8C5 12.57 8.13 14 12 14s7-1.43 7-3.2V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 10.8v4.6C5 17.17 8.13 18.6 12 18.6s7-1.43 7-3.2v-4.6" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
 }
 
 function chevronIcon(expanded) {
@@ -602,6 +612,57 @@ function openMoveModal(table) {
 }
 
 /** 关闭移动表弹窗 */
+function renderImportFolderOptions(selectedFolder = "") {
+  const selected = normalizeFolderPathClient(selectedFolder);
+  const folders = [...new Set(state.folders.map((f) => normalizeFolderPathClient(f)).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "zh-CN")
+  );
+
+  els.importFolderSelect.innerHTML = "";
+  els.importFolderSelect.appendChild(createOption("", "根目录（未分组）"));
+  folders.forEach((f) => els.importFolderSelect.appendChild(createOption(f, f)));
+  els.importFolderSelect.value = selected;
+}
+
+function openImportModal() {
+  renderImportFolderOptions("");
+  if (els.importModalMsg) setMessage(els.importModalMsg, "");
+  if (els.importModal) {
+    els.importModal.classList.remove("hidden");
+    els.importModal.setAttribute("aria-hidden", "false");
+  }
+  if (els.excelFile) {
+    els.excelFile.value = "";
+    els.excelFile.focus();
+  }
+}
+
+function closeImportModal() {
+  if (els.importModal) {
+    els.importModal.classList.add("hidden");
+    els.importModal.setAttribute("aria-hidden", "true");
+  }
+  if (els.importModalMsg) setMessage(els.importModalMsg, "");
+}
+
+function showImportResultModal(title, message, isError = false) {
+  if (!els.importResultModal || !els.importResultBody) {
+    window.alert(message || title || "导入完成");
+    return;
+  }
+  const titleEl = document.getElementById("importResultModalTitle");
+  if (titleEl) titleEl.textContent = title || (isError ? "导入失败" : "导入成功");
+  els.importResultBody.textContent = message || "";
+  els.importResultBody.className = `import-result-body${isError ? " text-red-600 border-red-200 bg-red-50" : ""}`;
+  els.importResultModal.classList.remove("hidden");
+  els.importResultModal.setAttribute("aria-hidden", "false");
+}
+
+function closeImportResultModal() {
+  if (!els.importResultModal) return;
+  els.importResultModal.classList.add("hidden");
+  els.importResultModal.setAttribute("aria-hidden", "true");
+}
 function closeMoveModal() {
   els.moveModal.classList.add("hidden");
   els.moveModal.setAttribute("aria-hidden", "true");
@@ -1147,24 +1208,34 @@ async function doQuery() {
 
 /** Excel 导入 */
 async function doImport() {
-  const file = els.excelFile.files?.[0];
+  const file = els.excelFile?.files?.[0];
   if (!file) {
-    setMessage(els.importMsg, "请选择 Excel 文件", true);
+    setMessage(els.importModalMsg, "请选择 Excel 文件", true);
     return;
   }
 
+  const folderPath = normalizeFolderPathClient(els.importFolderSelect?.value || "");
   const form = new FormData();
   form.append("file", file);
+  form.append("folder_path", folderPath);
+
   try {
     const data = await fetchJson("/api/import-excel", { method: "POST", body: form });
-    const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.table}`);
-    setMessage(els.importMsg, `导入完成，创建 ${data.count} 张表：${lines.join("；")}`);
+    const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.display_name || x.table}`);
+    const suffix = folderPath ? `目标文件夹：${folderPath}` : "目标文件夹：根目录";
+    const message = [`成功创建 ${data.count} 张表`, suffix, lines.join("；")].filter(Boolean).join("\n\n");
+    setMessage(els.importMsg, `导入完成：${data.count} 张表`);
+    closeImportModal();
+    showImportResultModal("导入成功", message, false);
     await loadTableData();
     await loadColumns();
     state.page = 1;
     if (state.currentTable) await doQuery();
   } catch (err) {
-    setMessage(els.importMsg, err.message || "导入失败", true);
+    const message = err.message || "导入失败";
+    setMessage(els.importMsg, message, true);
+    closeImportModal();
+    showImportResultModal("导入失败", message, true);
   }
 }
 
@@ -1232,7 +1303,24 @@ function bindEnterToQuery() {
 
 /** 绑定所有页面交互事件 */
 function bindEvents() {
-  els.importBtn.onclick = doImport;
+  els.importBtn.onclick = openImportModal;
+  if (els.importCloseBtn) els.importCloseBtn.onclick = () => closeImportModal();
+  if (els.importCancelBtn) els.importCancelBtn.onclick = () => closeImportModal();
+  if (els.importConfirmBtn) els.importConfirmBtn.onclick = doImport;
+  if (els.importModal) {
+    els.importModal.addEventListener("click", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      if (e.target.dataset.importClose === "1") closeImportModal();
+    });
+  }
+  if (els.importResultCloseBtn) els.importResultCloseBtn.onclick = () => closeImportResultModal();
+  if (els.importResultConfirmBtn) els.importResultConfirmBtn.onclick = () => closeImportResultModal();
+  if (els.importResultModal) {
+    els.importResultModal.addEventListener("click", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      if (e.target.dataset.importResultClose === "1") closeImportResultModal();
+    });
+  }
 
   if (els.recycleToggleBtn && els.recycleModal) {
     els.recycleToggleBtn.onclick = () => {
@@ -1338,6 +1426,12 @@ function bindEvents() {
       els.recycleModal.classList.add("hidden");
       els.recycleModal.setAttribute("aria-hidden", "true");
     }
+    if (e.key === "Escape" && els.importModal && !els.importModal.classList.contains("hidden")) {
+      closeImportModal();
+    }
+    if (e.key === "Escape" && els.importResultModal && !els.importResultModal.classList.contains("hidden")) {
+      closeImportResultModal();
+    }
     if (e.key === "Escape") closeActionMenu();
     if (e.key === "Escape" && els.folderCreateModal && !els.folderCreateModal.classList.contains("hidden")) {
       closeFolderCreateModal();
@@ -1442,6 +1536,15 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
+
+
+
+
+
+
 
 
 

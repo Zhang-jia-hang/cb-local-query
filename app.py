@@ -599,8 +599,19 @@ def get_numeric_columns(table_name: str, columns: list[str] | None = None) -> se
         conn.commit()
     return inferred
 
+
+def make_unique_display_name(base_name: str, used_names: set[str]) -> str:
+    """为导入后的显示名生成唯一后缀，避免左侧列表出现重名。"""
+    text = (base_name or "").strip() or "未命名表"
+    candidate = text
+    index = 1
+    while candidate in used_names:
+        index += 1
+        candidate = f"{text}_{index}"
+    used_names.add(candidate)
+    return candidate
 # ===================== Excel 导入 =====================
-def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
+def import_excel_to_sqlite(file_stream: io.BytesIO, folder_path: str = "") -> dict[str, Any]:
     """
     导入Excel文件到SQLite：
     1. 每个sheet → 一张表
@@ -612,13 +623,20 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
     xls = pd.ExcelFile(file_stream, engine="openpyxl")
     created: list[dict[str, str]] = []
     used_names: set[str] = set(list_physical_tables())
+    target_folder = normalize_folder_path(folder_path)
     now = now_str()
 
+    if target_folder:
+        ensure_folder(target_folder)
+
     with get_conn() as conn:
+        used_display_names = {r["display_name"] for r in conn.execute(f"SELECT display_name FROM {META_TABLE}").fetchall()}
+
         for idx, sheet in enumerate(xls.sheet_names, start=1):
             fallback = f"sheet_{idx}"
             table_name = _normalize_identifier(sheet, fallback)
             original_name = table_name
+            display_name = make_unique_display_name(sheet, used_display_names)
             suffix = 1
             # 处理与现有表名、同次导入工作表名的冲突，生成唯一表名。
             while table_name in used_names:
@@ -652,11 +670,11 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
 
             # 更新表元数据
             conn.execute(
-                f"INSERT OR REPLACE INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, COALESCE((SELECT folder_path FROM {META_TABLE} WHERE table_name = ?), ''), 0, NULL, COALESCE((SELECT created_at FROM {META_TABLE} WHERE table_name = ?), ?))",
-                (table_name, sheet, table_name, table_name, now),
+                f"INSERT OR REPLACE INTO {META_TABLE} (table_name, display_name, folder_path, is_deleted, deleted_at, created_at) VALUES (?, ?, ?, 0, NULL, COALESCE((SELECT created_at FROM {META_TABLE} WHERE table_name = ?), ?))",
+                (table_name, display_name, target_folder, table_name, now),
             )
             _save_column_meta(conn, table_name, cols, numeric_cols, now)
-            created.append({"sheet": sheet, "table": table_name})
+            created.append({"sheet": sheet, "table": table_name, "display_name": display_name})
 
         folder_cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({FOLDER_TABLE})").fetchall()}
         if "is_deleted" not in folder_cols:
@@ -666,7 +684,6 @@ def import_excel_to_sqlite(file_stream: io.BytesIO) -> dict[str, Any]:
         conn.commit()
 
     return {"created": created, "count": len(created)}
-
 # ===================== 查询构建工具 =====================
 def apply_hidden_columns(all_columns: list[str], hidden_columns: list[str]) -> list[str]:
     """过滤隐藏列，返回前端可见列"""
@@ -1145,13 +1162,13 @@ def create_app() -> Flask:
         if not file.filename:
             return jsonify({"error": "invalid file"}), 400
 
+        folder_path = request.form.get("folder_path", "")
         content = io.BytesIO(file.read())
         try:
-            summary = import_excel_to_sqlite(content)
+            summary = import_excel_to_sqlite(content, folder_path=folder_path)
             return jsonify(summary)
         except Exception as ex:
             return jsonify({"error": f"导入失败: {ex}"}), 500
-
     # 数据查询（分页、搜索、筛选、排序）
     @app.post("/api/query")
     def api_query():
@@ -1233,6 +1250,10 @@ def run_app() -> None:
 # 主入口
 if __name__ == "__main__":
     run_app()
+
+
+
+
 
 
 

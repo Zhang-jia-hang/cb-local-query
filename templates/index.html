@@ -12,15 +12,9 @@
 
   <div class="app-shell">
     <aside class="sidebar">
-      <section class="card hero mb-4">
-        <p class="kicker">LOCAL DATA WORKBENCH</p>
-        <h1 class="text-2xl font-bold mb-2">勤博数据查询系统</h1>
-        <p class="text-sm text-slate-600">支持文件夹、回收站、重命名、多条件查询</p>
-      </section>
-
       <section class="card mb-3 table-manage-card">
         <div class="section-head mb-2">
-          <h2 class="text-lg font-semibold">数据表管理</h2>
+          <h2 class="text-lg font-semibold title-with-icon"><span class="title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="7" ry="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v5.5C5 13.43 8.13 15 12 15s7-1.57 7-3.5V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 11.5V17c0 1.93 3.13 3.5 7 3.5s7-1.57 7-3.5v-5.5" stroke="currentColor" stroke-width="1.8"/></svg></span><span>数据表管理</span></h2>
           <span class="badge" id="tableCountBadge">0</span>
         </div>
 
@@ -34,20 +28,14 @@
         <div id="tableList" class="table-list mb-2">
           <p class="table-empty">暂无数据表</p>
         </div>
-      </section>
-
-      <section class="card side-card">
-        <div class="import-box no-border-top">
+          <div class="import-box no-border-top">
           <div class="section-head mb-2">
-            <label class="label m-0">导入 Excel 文件</label>
+            <label class="label m-0">数据操作</label>
             <span class="chip">多工作表自动建表</span>
           </div>
-          <div class="upload-shell">
-            <input id="excelFile" type="file" accept=".xlsx,.xls" class="input upload-input" />
-          </div>
-          <div class="import-actions">
+          <div class="import-actions import-actions-vertical">
             <button id="recycleToggleBtn" class="btn recycle-toggle" type="button">回收站</button>
-            <button id="importBtn" class="btn btn-primary w-full">导入并建表</button>
+            <button id="importBtn" class="btn btn-primary w-full" type="button">导入并建表</button>
           </div>
           <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
         </div>
@@ -132,6 +120,19 @@
         <div class="table-wrap">
           <table id="resultTable" class="table"></table>
         </div>
+          <div class="section-head mb-3">
+            <label class="label-inline">每页条数</label>
+            <select id="pageSize" class="input page-size-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+            <button id="prevBtn" class="btn">上一页</button>
+            <span id="pageInfo" class="text-sm"></span>
+            <button id="nextBtn" class="btn">下一页</button>
+          </div>
+        </div>
       </section>
     </main>
   </div>
@@ -208,10 +209,58 @@
       </div>
     </div>
   </div>
+  <div id="importModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-mask" data-import-close="1"></div>
+    <div class="modal-panel import-modal-panel" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+      <div class="section-head mb-2">
+        <h3 id="importModalTitle" class="text-lg font-semibold">导入并建表</h3>
+        <button id="importCloseBtn" class="btn btn-mini" type="button">关闭</button>
+      </div>
+
+      <div class="import-form">
+        <div>
+          <label class="label">选择 Excel 文件</label>
+          <div class="upload-shell upload-shell-large">
+            <input id="excelFile" type="file" accept=".xlsx,.xls" class="input upload-input" />
+          </div>
+        </div>
+
+        <div>
+          <label class="label">导入到文件夹</label>
+          <select id="importFolderSelect" class="input"></select>
+          <p class="text-sm text-slate-600 mt-2">不选择则导入到根目录。</p>
+        </div>
+      </div>
+
+      <p id="importModalMsg" class="text-sm mt-2 text-slate-600"></p>
+
+      <div class="modal-actions">
+        <button id="importConfirmBtn" class="btn btn-primary" type="button">确认导入</button>
+        <button id="importCancelBtn" class="btn" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+  <div id="importResultModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-mask" data-import-result-close="1"></div>
+    <div class="modal-panel import-result-modal-panel" role="dialog" aria-modal="true" aria-labelledby="importResultModalTitle">
+      <div class="section-head mb-2">
+        <h3 id="importResultModalTitle" class="text-lg font-semibold">导入结果</h3>
+        <button id="importResultCloseBtn" class="btn btn-mini" type="button">关闭</button>
+      </div>
+      <div id="importResultBody" class="import-result-body"></div>
+      <div class="modal-actions">
+        <button id="importResultConfirmBtn" class="btn btn-primary" type="button">我知道了</button>
+      </div>
+    </div>
+  </div>
   <script src="/static/js/app.js"></script>
 
 </body>
 </html>
+
+
+
+
 
 
 
