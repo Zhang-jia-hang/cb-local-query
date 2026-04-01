@@ -10,21 +10,18 @@
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
 
-  <div id="globalNotice" class="global-notice hidden" aria-live="polite"></div>
+  <div id="globalNotice" class="global-notice-stack" aria-live="polite" aria-atomic="false"></div>
   <div class="app-shell">
     <aside class="sidebar">
       <section class="card mb-3 table-manage-card">
         <div class="section-head mb-2">
-          <h2 class="text-lg font-semibold title-with-icon"><span class="title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="7" ry="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v5.5C5 13.43 8.13 15 12 15s7-1.57 7-3.5V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 11.5V17c0 1.93 3.13 3.5 7 3.5s7-1.57 7-3.5v-5.5" stroke="currentColor" stroke-width="1.8"/></svg></span><span>数据表管理</span></h2>
-          <span class="badge" id="tableCountBadge">0</span>
+          <h2 class="text-lg font-semibold title-with-icon"><span class="title-icon title-icon-database" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6.2" rx="6.5" ry="2.7" stroke="currentColor" stroke-width="1.9"/><path d="M5.5 6.2v5.1c0 1.49 2.91 2.7 6.5 2.7s6.5-1.21 6.5-2.7V6.2" stroke="currentColor" stroke-width="1.9"/><path d="M5.5 11.3v5c0 1.49 2.91 2.7 6.5 2.7s6.5-1.21 6.5-2.7v-5" stroke="currentColor" stroke-width="1.9"/></svg></span><span>数据表管理</span></h2>
+          <sapn class="badge">共<span  id="tableCountBadge">0</span>张表</sapn>
         </div>
 
         <div class="table-manage-toolbar mb-2">
-          <button id="folderCreateToggleBtn" class="btn btn-secondary" type="button">新建文件夹</button>
-          <p class="toolbar-hint">支持多级路径与当前文件夹下新建</p>
+          <p class="toolbar-hint">勤博数据查询系统</p>
         </div>
-
-
 
         <div id="tableList" class="table-list mb-2">
           <p class="table-empty">暂无数据表</p>
@@ -36,6 +33,7 @@
           </div>
           <div class="import-actions import-actions-vertical">
             <button id="recycleToggleBtn" class="btn recycle-toggle" type="button">回收站</button>
+              <button id="folderCreateToggleBtn" class="btn btn-secondary" type="button">新建文件夹</button>
             <button id="importBtn" class="btn btn-primary w-full" type="button">导入并建表</button>
           </div>
           <p id="importMsg" class="text-sm mt-2 text-slate-600"></p>
@@ -64,7 +62,7 @@
           <div class="quick-actions">
             <button id="searchBtn" class="btn btn-primary">查询</button>
             <button id="resetBtn" class="btn">重置</button>
-            <button id="exportBtn" class="btn btn-success">导出当前结果 Excel</button>
+            <button id="exportBtn" class="btn btn-success">导出当前结果</button>
           </div>
         </div>
 
@@ -102,7 +100,7 @@
       </section>
 
       <section class="card result-card">
-        <div class="result-toolbar result-toolbar-top">
+        <div class="result-toolbar">
           <div class="result-toolbar-title">
             <h2 class="text-lg font-semibold">查询结果</h2>
             <span id="pageInfo" class="text-sm"></span>
@@ -176,7 +174,7 @@
     <div class="modal-mask" data-recycle-close="1"></div>
     <div class="modal-panel recycle-modal-panel" role="dialog" aria-modal="true" aria-labelledby="recycleModalTitle">
       <div class="section-head mb-2">
-        <h3 id="recycleModalTitle" class="text-lg font-semibold">回收站</h3>
+        <h3 id="recycleModalTitle" class="text-lg font-semibold title-with-icon"><span class="title-icon title-icon-recycle" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M9 7V5.5h6V7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M7.5 7.5l1 11h7l1-11" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M10 11v4.5M14 11v4.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></span><span>回收站</span></h3>
         <button id="recycleCloseBtn" class="btn btn-mini" type="button">关闭</button>
       </div>
       <div class="recycle-modal-toolbar mb-2">
@@ -205,6 +203,7 @@
         <div>
           <label class="label">文件夹路径</label>
           <input id="newFolderPath" class="input" placeholder="例如：财务/2026/Q1 或 输入子目录名" />
+          <p class="text-sm text-slate-600 mt-2">支持多级路径与当前文件夹下新建</p>
           <p class="text-sm text-slate-600 mt-2">在指定文件夹下新建时，输入子目录名即可；也支持直接输入多级路径。</p>
         </div>
       </div>
@@ -265,6 +264,8 @@
 
 </body>
 </html>
+
+
 
 
 

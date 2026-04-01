@@ -21,7 +21,8 @@ const state = {
 };
 
 let activeActionMenu = null;
-let globalNoticeTimer = null;
+const recentNoticeMap = new Map();
+
 
 function closeActionMenu() {
   if (!activeActionMenu) return;
@@ -30,20 +31,110 @@ function closeActionMenu() {
 }
 
 function showGlobalNotice(message, isError = false) {
-  if (!els.globalNotice) return;
-  if (globalNoticeTimer) {
-    clearTimeout(globalNoticeTimer);
-    globalNoticeTimer = null;
-  }
-  els.globalNotice.textContent = message || "";
-  els.globalNotice.classList.remove("hidden", "is-error");
-  if (isError) els.globalNotice.classList.add("is-error");
-  globalNoticeTimer = setTimeout(() => {
-    els.globalNotice.classList.add("hidden");
-    els.globalNotice.classList.remove("is-error");
-  }, 4000);
+  if (!els.globalNotice || !message) return;
+
+  const text = String(message).trim();
+  if (!text) return;
+  const noticeKey = `${isError ? "error" : "info"}:${text}`;
+  const now = Date.now();
+  const lastShownAt = recentNoticeMap.get(noticeKey) || 0;
+  if (now - lastShownAt < 1800) return;
+  recentNoticeMap.set(noticeKey, now);
+
+  const notice = document.createElement("div");
+  notice.className = `global-notice${isError ? " is-error" : ""}`;
+
+  const textNode = document.createElement("div");
+  textNode.className = "global-notice-text";
+  textNode.textContent = text;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "global-notice-close";
+  closeBtn.setAttribute("aria-label", "关闭通知");
+  closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+  notice.appendChild(textNode);
+  notice.appendChild(closeBtn);
+  els.globalNotice.appendChild(notice);
+
+  const removeNotice = () => {
+    if (!notice.parentNode) return;
+    notice.classList.add("is-leaving");
+    window.setTimeout(() => {
+      if (notice.parentNode) notice.parentNode.removeChild(notice);
+    }, 220);
+  };
+
+  closeBtn.addEventListener("click", removeNotice);
+  window.setTimeout(removeNotice, 4000);
+  window.setTimeout(() => {
+    if (recentNoticeMap.get(noticeKey) === now) recentNoticeMap.delete(noticeKey);
+  }, 2200);
 }
 
+
+function iconSvg(name) {
+  const icons = {
+    search: `<svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    reset: `<svg viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    export: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    add: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    delete: `<svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 7V5h6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 10v7M12 10v7M16 10v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 7l1 12h8l1-12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    folder: `<svg viewBox="0 0 24 24" fill="none"><path d="M4 7.5h5l1.7 2H20v7.8A1.7 1.7 0 0 1 18.3 19H5.7A1.7 1.7 0 0 1 4 17.3V7.5Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    import: `<svg viewBox="0 0 24 24" fill="none"><path d="M12 15V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 19h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    recycle: `<svg viewBox="0 0 24 24" fill="none"><path d="M3 7h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7 7l1 12h8l1-12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 7V5h6v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    prev: `<svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    next: `<svg viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    move: `<svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 8l6 4-6 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    edit: `<svg viewBox="0 0 24 24" fill="none"><path d="M4 20l4.5-1 9.2-9.2-3.5-3.5L5 15.5 4 20Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M13.5 6.5l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    restore: `<svg viewBox="0 0 24 24" fill="none"><path d="M8 7H4v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.8 10a8 8 0 1 0 2.2-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+    close: `<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`
+  };
+  return icons[name] || icons.add;
+}
+
+function setButtonIcon(el, iconName) {
+  if (!el || el.dataset.iconApplied === "1") return;
+  const label = el.textContent.trim();
+  el.innerHTML = `<span class="btn-icon" aria-hidden="true">${iconSvg(iconName)}</span><span class="btn-label">${label}</span>`;
+  el.dataset.iconApplied = "1";
+}
+
+function decorateStaticButtons() {
+  const mapping = [
+    [els.searchBtn, "search"],
+    [els.resetBtn, "reset"],
+    [els.exportBtn, "export"],
+    [els.addFilterBtn, "add"],
+    [els.addSortBtn, "add"],
+    [els.hideSelectedBtn, "delete"],
+    [els.unhideSelectedBtn, "restore"],
+    [els.clearHiddenBtn, "restore"],
+    [els.prevBtn, "prev"],
+    [els.prevBtnBottom, "prev"],
+    [els.nextBtn, "next"],
+    [els.nextBtnBottom, "next"],
+    [els.importBtn, "import"],
+    [els.recycleToggleBtn, "recycle"],
+    [els.folderCreateToggleBtn, "folder"],
+    [els.recyclePurgeAllBtn, "delete"],
+    [els.moveConfirmBtn, "move"],
+    [els.moveCancelBtn, "close"],
+    [els.moveModalCloseBtn, "close"],
+    [els.moveCreateFolderBtn, "folder"],
+    [els.importConfirmBtn, "import"],
+    [els.importCancelBtn, "close"],
+    [els.importCloseBtn, "close"],
+    [els.importResultConfirmBtn, "close"],
+    [els.importResultCloseBtn, "close"],
+    [els.recycleCloseBtn, "close"],
+    [els.createFolderBtn, "folder"],
+    [els.folderCreateCancelBtn, "close"],
+    [els.folderCreateCloseBtn, "close"]
+  ];
+  mapping.forEach(([el, iconName]) => setButtonIcon(el, iconName));
+}
 // ===================== DOM 元素缓存：统一管理页面所有节点 =====================
 const els = {
   excelFile: document.getElementById("excelFile"),
@@ -126,9 +217,12 @@ const els = {
 // ===================== 通用工具函数 =====================
 /** 统一设置提示消息，支持错误样式 */
 function setMessage(el, text, isError = false) {
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = `text-sm mt-2 ${isError ? "text-red-600" : "text-slate-600"}`;
+  if (el) {
+    el.textContent = "";
+    el.className = `text-sm mt-2 ${isError ? "text-red-600" : "text-slate-600"}`;
+  }
+  if (!text) return;
+  showGlobalNotice(text, isError);
 }
 
 /** 设置查询状态：禁用/启用按钮，防止重复提交 */
@@ -418,13 +512,13 @@ async function loadTableData() {
 /** 渲染左侧表格管理面板（分组展示） */
 function folderIcon(hasContent = true) {
   if (!hasContent) {
-    return `<span class="item-icon folder-icon-empty" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8.2a2.2 2.2 0 0 1 2.2-2.2h4.9l1.4 1.7H18a2 2 0 0 1 2 2v6.1a2.2 2.2 0 0 1-2.2 2.2H6.2A2.2 2.2 0 0 1 4 15.8V8.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+    return `<span class="item-icon folder-icon-empty" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4.5 7.5A1.5 1.5 0 0 1 6 6h4.4l1.8 2H18a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 18 18H6a1.5 1.5 0 0 1-1.5-1.5v-9Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg></span>`;
   }
-  return `<span class="item-icon folder-icon-filled" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3.5 7.5h6l1.7 2h9.3v7.8a2.2 2.2 0 0 1-2.2 2.2H5.7a2.2 2.2 0 0 1-2.2-2.2V9.7a2.2 2.2 0 0 1 2.2-2.2Z" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+  return `<span class="item-icon folder-icon-filled" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4.5 7.5A1.5 1.5 0 0 1 6 6h4.4l1.8 2H18a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 18 18H6a1.5 1.5 0 0 1-1.5-1.5v-9Z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M4.5 10h15" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></span>`;
 }
 
 function tableIcon() {
-  return `<span class="item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="7" ry="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v4.8C5 12.57 8.13 14 12 14s7-1.43 7-3.2V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 10.8v4.6C5 17.17 8.13 18.6 12 18.6s7-1.43 7-3.2v-4.6" stroke="currentColor" stroke-width="1.8"/></svg></span>`;
+  return `<span class="item-icon table-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6.2" rx="6.5" ry="2.7" stroke="currentColor" stroke-width="1.9"/><path d="M5.5 6.2v5.1c0 1.49 2.91 2.7 6.5 2.7s6.5-1.21 6.5-2.7V6.2" stroke="currentColor" stroke-width="1.9"/><path d="M5.5 11.3v5c0 1.49 2.91 2.7 6.5 2.7s6.5-1.21 6.5-2.7v-5" stroke="currentColor" stroke-width="1.9"/></svg></span>`;
 }
 
 function chevronIcon(expanded) {
@@ -517,6 +611,7 @@ function makeFolderRow(node, depth) {
   createBtn.type = "button";
   createBtn.className = "action-menu-item";
   createBtn.textContent = "在此新建";
+  setButtonIcon(createBtn, "folder");
   createBtn.onclick = () => {
     closeActionMenu();
     setFolderExpanded(node.path, true);
@@ -527,6 +622,7 @@ function makeFolderRow(node, depth) {
   renameBtn.type = "button";
   renameBtn.className = "action-menu-item";
   renameBtn.textContent = "重命名";
+  setButtonIcon(renameBtn, "edit");
   renameBtn.onclick = async () => {
     const name = window.prompt("请输入新的文件夹路径", node.path);
     if (name === null || !name.trim()) return;
@@ -791,6 +887,7 @@ function renderTableRow(table, depth = 0) {
   renameBtn.type = "button";
   renameBtn.className = "action-menu-item";
   renameBtn.textContent = "重命名";
+  setButtonIcon(renameBtn, "edit");
   renameBtn.onclick = async () => {
     const name = window.prompt("请输入新表名（显示名）", table.display_name || "");
     if (name === null || !name.trim()) return;
@@ -812,6 +909,7 @@ function renderTableRow(table, depth = 0) {
   moveBtn.type = "button";
   moveBtn.className = "action-menu-item";
   moveBtn.textContent = "移动";
+  setButtonIcon(moveBtn, "move");
   moveBtn.onclick = () => {
     closeActionMenu();
     openMoveModal(table);
@@ -821,6 +919,7 @@ function renderTableRow(table, depth = 0) {
   delBtn.type = "button";
   delBtn.className = "action-menu-item danger";
   delBtn.textContent = "删除";
+  setButtonIcon(delBtn, "delete");
   delBtn.onclick = async () => {
     const ok = window.confirm(`确认删除【${table.display_name}】到回收站吗？`);
     if (!ok) return;
@@ -893,6 +992,7 @@ function renderRecycleBin() {
     const restore = document.createElement("button");
     restore.className = "btn btn-mini";
     restore.textContent = "恢复";
+    setButtonIcon(restore, "restore");
     restore.onclick = async () => {
       try {
         await restoreRecycleFolder(item.folder_path);
@@ -906,6 +1006,7 @@ function renderRecycleBin() {
     const purge = document.createElement("button");
     purge.className = "btn btn-danger btn-mini";
     purge.textContent = "彻底删除";
+    setButtonIcon(purge, "delete");
     purge.onclick = async () => {
       const ok = window.confirm(`确认彻底删除文件夹【${item.folder_path}】吗？该操作不可恢复。`);
       if (!ok) return;
@@ -939,6 +1040,7 @@ function renderRecycleBin() {
     const restore = document.createElement("button");
     restore.className = "btn btn-mini";
     restore.textContent = "恢复";
+    setButtonIcon(restore, "restore");
     restore.onclick = async () => {
       try {
         await fetchJson(`/api/table/${encodeURIComponent(t.table_name)}/restore`, { method: "POST" });
@@ -952,6 +1054,7 @@ function renderRecycleBin() {
     const purge = document.createElement("button");
     purge.className = "btn btn-danger btn-mini";
     purge.textContent = "彻底删除";
+    setButtonIcon(purge, "delete");
     purge.onclick = async () => {
       const ok = window.confirm(`确认彻底删除【${t.display_name}】吗？该操作不可恢复。`);
       if (!ok) return;
@@ -1313,7 +1416,7 @@ async function doImport() {
     setMessage(els.importMsg, "");
     showGlobalNotice(`导入完成：${data.count} 张表`);
     closeImportModal();
-    showImportResultModal("导入成功", message, false);
+    
     await loadTableData();
     await loadColumns();
     state.page = 1;
@@ -1323,7 +1426,7 @@ async function doImport() {
     setMessage(els.importMsg, "");
     showGlobalNotice(message, true);
     closeImportModal();
-    showImportResultModal("导入失败", message, true);
+    
   }
 }
 
@@ -1648,6 +1751,7 @@ function bindEvents() {
 async function init() {
   loadExpandedFolders();
   bindEvents();
+  decorateStaticButtons();
   addConditionRow();
   addSortRow();
   await loadTableData();
@@ -1657,6 +1761,11 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
+
+
 
 
 
