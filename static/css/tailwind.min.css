@@ -668,3 +668,23 @@ body {
   }
 }
 
+
+
+.folder-create-modal-panel {
+  width: min(520px, calc(100vw - 2rem));
+}
+
+.folder-create-form {
+  display: grid;
+  gap: .75rem;
+}
+
+.folder-create-context {
+  border: 1px solid #d5e1f2;
+  border-radius: 10px;
+  padding: .65rem .75rem;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+  color: #35557d;
+  font-size: .9rem;
+}
+

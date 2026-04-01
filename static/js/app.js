@@ -15,8 +15,8 @@ const state = {
   querying: false,            // 是否正在查询中（防重复提交）
   moveTargetTable: "",        // 待移动的表名
   moveTargetDisplayName: "",  // 待移动表的显示名
-  expandedFolders: new Set(), // ???????????
-  folderCreateParent: "",     // ???????????
+  expandedFolders: new Set(), // 左侧已展开的文件夹路径
+  folderCreateParent: "",     // 当前新建文件夹的父目录
 };
 
 let activeActionMenu = null;
@@ -36,9 +36,11 @@ const els = {
   recycleList: document.getElementById("recycleList"),
   tableCountBadge: document.getElementById("tableCountBadge"),
   folderCreateToggleBtn: document.getElementById("folderCreateToggleBtn"),
-  folderCreatePanel: document.getElementById("folderCreatePanel"),
+  folderCreateModal: document.getElementById("folderCreateModal"),
   folderCreateContext: document.getElementById("folderCreateContext"),
   folderCreateCancelBtn: document.getElementById("folderCreateCancelBtn"),
+  folderCreateCloseBtn: document.getElementById("folderCreateCloseBtn"),
+  folderCreateMsg: document.getElementById("folderCreateMsg"),
   newFolderPath: document.getElementById("newFolderPath"),
   createFolderBtn: document.getElementById("createFolderBtn"),
   recycleToggleBtn: document.getElementById("recycleToggleBtn"),
@@ -160,22 +162,30 @@ function setFolderExpanded(path, expanded) {
   saveExpandedFolders();
 }
 
-function openFolderCreatePanel(parentPath = "") {
+function openFolderCreateModal(parentPath = "") {
   state.folderCreateParent = normalizeFolderPathClient(parentPath);
   if (els.folderCreateContext) {
-    els.folderCreateContext.textContent = `新建位置：${state.folderCreateParent || "根目录"}`;
+    els.folderCreateContext.textContent = state.folderCreateParent || "根目录";
   }
-  if (els.folderCreatePanel) els.folderCreatePanel.classList.remove("hidden");
+  if (els.folderCreateModal) {
+    els.folderCreateModal.classList.remove("hidden");
+    els.folderCreateModal.setAttribute("aria-hidden", "false");
+  }
+  if (els.folderCreateMsg) setMessage(els.folderCreateMsg, "");
   if (els.newFolderPath) {
     els.newFolderPath.value = "";
     els.newFolderPath.focus();
   }
 }
 
-function closeFolderCreatePanel() {
+function closeFolderCreateModal() {
   state.folderCreateParent = "";
-  if (els.folderCreatePanel) els.folderCreatePanel.classList.add("hidden");
-  if (els.folderCreateContext) els.folderCreateContext.textContent = "新建位置：根目录";
+  if (els.folderCreateModal) {
+    els.folderCreateModal.classList.add("hidden");
+    els.folderCreateModal.setAttribute("aria-hidden", "true");
+  }
+  if (els.folderCreateContext) els.folderCreateContext.textContent = "根目录";
+  if (els.folderCreateMsg) setMessage(els.folderCreateMsg, "");
   if (els.newFolderPath) els.newFolderPath.value = "";
 }
 
@@ -419,7 +429,7 @@ function makeFolderRow(node, depth) {
   createBtn.onclick = () => {
     closeActionMenu();
     setFolderExpanded(node.path, true);
-    openFolderCreatePanel(node.path);
+    openFolderCreateModal(node.path);
   };
 
   const renameBtn = document.createElement("button");
@@ -1198,12 +1208,23 @@ function bindEvents() {
     });
   }
 
-  // 左侧新建文件夹面板
+  // 新建文件夹弹窗
   if (els.folderCreateToggleBtn) {
-    els.folderCreateToggleBtn.onclick = () => openFolderCreatePanel("");
+    els.folderCreateToggleBtn.onclick = () => openFolderCreateModal("");
   }
   if (els.folderCreateCancelBtn) {
-    els.folderCreateCancelBtn.onclick = () => closeFolderCreatePanel();
+    els.folderCreateCancelBtn.onclick = () => closeFolderCreateModal();
+  }
+  if (els.folderCreateCloseBtn) {
+    els.folderCreateCloseBtn.onclick = () => closeFolderCreateModal();
+  }
+  if (els.folderCreateModal) {
+    els.folderCreateModal.addEventListener("click", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      if (e.target.dataset.folderCreateClose === "1") {
+        closeFolderCreateModal();
+      }
+    });
   }
 
   els.createFolderBtn.onclick = async () => {
@@ -1211,11 +1232,11 @@ function bindEvents() {
       const created = await createFolder(buildCreateFolderPath(els.newFolderPath.value || ""));
       if (state.folderCreateParent) setFolderExpanded(state.folderCreateParent, true);
       setFolderExpanded(created, true);
-      closeFolderCreatePanel();
+      closeFolderCreateModal();
       await loadTableData();
       setMessage(els.importMsg, `文件夹创建成功：${created}`);
     } catch (err) {
-      setMessage(els.importMsg, err.message || "创建文件夹失败", true);
+      setMessage(els.folderCreateMsg, err.message || "创建文件夹失败", true);
     }
   };
 
@@ -1270,8 +1291,8 @@ function bindEvents() {
       els.recycleModal.setAttribute("aria-hidden", "true");
     }
     if (e.key === "Escape") closeActionMenu();
-    if (e.key === "Escape" && els.folderCreatePanel && !els.folderCreatePanel.classList.contains("hidden")) {
-      closeFolderCreatePanel();
+    if (e.key === "Escape" && els.folderCreateModal && !els.folderCreateModal.classList.contains("hidden")) {
+      closeFolderCreateModal();
     }
   });
 
@@ -1373,6 +1394,8 @@ async function init() {
 
 // 启动页面
 init();
+
+
 
 
 

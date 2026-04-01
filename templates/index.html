@@ -29,16 +29,7 @@
           <p class="toolbar-hint">支持多级路径与当前文件夹下新建</p>
         </div>
 
-        <div id="folderCreatePanel" class="folder-create-panel hidden mb-2">
-          <div class="folder-create-panel-head">
-            <span id="folderCreateContext" class="text-sm text-slate-600">新建位置：根目录</span>
-            <button id="folderCreateCancelBtn" class="btn btn-mini" type="button">取消</button>
-          </div>
-          <div class="folder-create">
-            <input id="newFolderPath" class="input" placeholder="例如：财务/2026/Q1 或 输入子目录名" />
-            <button id="createFolderBtn" class="btn">创建</button>
-          </div>
-        </div>
+
 
         <div id="tableList" class="table-list mb-2">
           <p class="table-empty">暂无数据表</p>
@@ -188,7 +179,39 @@
     </div>
   </div>
 
+  <div id="folderCreateModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-mask" data-folder-create-close="1"></div>
+    <div class="modal-panel folder-create-modal-panel" role="dialog" aria-modal="true" aria-labelledby="folderCreateModalTitle">
+      <div class="section-head mb-2">
+        <h3 id="folderCreateModalTitle" class="text-lg font-semibold">新建文件夹</h3>
+        <button id="folderCreateCloseBtn" class="btn btn-mini" type="button">关闭</button>
+      </div>
+
+      <div class="folder-create-form">
+        <div>
+          <label class="label">新建位置</label>
+          <div id="folderCreateContext" class="folder-create-context">根目录</div>
+        </div>
+
+        <div>
+          <label class="label">文件夹路径</label>
+          <input id="newFolderPath" class="input" placeholder="例如：财务/2026/Q1 或 输入子目录名" />
+          <p class="text-sm text-slate-600 mt-2">在指定文件夹下新建时，输入子目录名即可；也支持直接输入多级路径。</p>
+        </div>
+      </div>
+
+      <p id="folderCreateMsg" class="text-sm mt-2 text-slate-600"></p>
+
+      <div class="modal-actions">
+        <button id="createFolderBtn" class="btn btn-primary" type="button">创建</button>
+        <button id="folderCreateCancelBtn" class="btn" type="button">取消</button>
+      </div>
+    </div>
+  </div>
   <script src="/static/js/app.js"></script>
+
 </body>
 </html>
+
+
 
