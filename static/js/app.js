@@ -21,11 +21,27 @@ const state = {
 };
 
 let activeActionMenu = null;
+let globalNoticeTimer = null;
 
 function closeActionMenu() {
   if (!activeActionMenu) return;
   activeActionMenu.classList.add("hidden");
   activeActionMenu = null;
+}
+
+function showGlobalNotice(message, isError = false) {
+  if (!els.globalNotice) return;
+  if (globalNoticeTimer) {
+    clearTimeout(globalNoticeTimer);
+    globalNoticeTimer = null;
+  }
+  els.globalNotice.textContent = message || "";
+  els.globalNotice.classList.remove("hidden", "is-error");
+  if (isError) els.globalNotice.classList.add("is-error");
+  globalNoticeTimer = setTimeout(() => {
+    els.globalNotice.classList.add("hidden");
+    els.globalNotice.classList.remove("is-error");
+  }, 4000);
 }
 
 // ===================== DOM 元素缓存：统一管理页面所有节点 =====================
@@ -43,6 +59,9 @@ const els = {
   importResultBody: document.getElementById("importResultBody"),
   importResultCloseBtn: document.getElementById("importResultCloseBtn"),
   importResultConfirmBtn: document.getElementById("importResultConfirmBtn"),
+  recycleSummary: document.getElementById("recycleSummary"),
+  recyclePurgeAllBtn: document.getElementById("recyclePurgeAllBtn"),
+  globalNotice: document.getElementById("globalNotice"),
   tableList: document.getElementById("tableList"),
   recycleList: document.getElementById("recycleList"),
   tableCountBadge: document.getElementById("tableCountBadge"),
@@ -831,10 +850,66 @@ function renderTableRow(table, depth = 0) {
 /** 渲染回收站列表 */
 function renderRecycleBin() {
   els.recycleList.innerHTML = "";
-  if (!state.recycleBin.length) {
+  const recycleFolderCount = state.recycleFolders.length;
+  const recycleTableCount = state.recycleBin.length;
+  const totalDeleted = recycleFolderCount + recycleTableCount;
+  if (els.recycleSummary) {
+    els.recycleSummary.textContent = `共 ${totalDeleted} 个已删除文件`;
+  }
+  if (els.recyclePurgeAllBtn) {
+    els.recyclePurgeAllBtn.disabled = totalDeleted === 0;
+  }
+
+  if (!totalDeleted) {
     els.recycleList.innerHTML = "<p class='table-empty'>回收站为空</p>";
     return;
   }
+
+  state.recycleFolders.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "recycle-row";
+
+    const txt = document.createElement("div");
+    txt.className = "recycle-name";
+    txt.innerHTML = `${folderIcon(true)}<span>${escapeHtml(item.folder_path)}（文件夹，含 ${item.table_count} 张表）</span>`;
+
+    const acts = document.createElement("div");
+    acts.className = "row-actions";
+
+    const restore = document.createElement("button");
+    restore.className = "btn btn-mini";
+    restore.textContent = "恢复";
+    restore.onclick = async () => {
+      try {
+        await restoreRecycleFolder(item.folder_path);
+        await loadTableData();
+        setMessage(els.importMsg, "文件夹恢复成功");
+      } catch (err) {
+        setMessage(els.importMsg, err.message || "文件夹恢复失败", true);
+      }
+    };
+
+    const purge = document.createElement("button");
+    purge.className = "btn btn-danger btn-mini";
+    purge.textContent = "彻底删除";
+    purge.onclick = async () => {
+      const ok = window.confirm(`确认彻底删除文件夹【${item.folder_path}】吗？该操作不可恢复。`);
+      if (!ok) return;
+      try {
+        await purgeRecycleFolder(item.folder_path);
+        await loadTableData();
+        setMessage(els.importMsg, "文件夹已彻底删除");
+      } catch (err) {
+        setMessage(els.importMsg, err.message || "文件夹彻底删除失败", true);
+      }
+    };
+
+    acts.appendChild(restore);
+    acts.appendChild(purge);
+    row.appendChild(txt);
+    row.appendChild(acts);
+    els.recycleList.appendChild(row);
+  });
 
   state.recycleBin.forEach((t) => {
     const row = document.createElement("div");
@@ -847,7 +922,6 @@ function renderRecycleBin() {
     const acts = document.createElement("div");
     acts.className = "row-actions";
 
-    // 恢复
     const restore = document.createElement("button");
     restore.className = "btn btn-mini";
     restore.textContent = "恢复";
@@ -861,7 +935,6 @@ function renderRecycleBin() {
       }
     };
 
-    // 彻底删除
     const purge = document.createElement("button");
     purge.className = "btn btn-danger btn-mini";
     purge.textContent = "彻底删除";
@@ -879,7 +952,6 @@ function renderRecycleBin() {
 
     acts.appendChild(restore);
     acts.appendChild(purge);
-
     row.appendChild(txt);
     row.appendChild(acts);
     els.recycleList.appendChild(row);
@@ -1224,7 +1296,8 @@ async function doImport() {
     const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.display_name || x.table}`);
     const suffix = folderPath ? `目标文件夹：${folderPath}` : "目标文件夹：根目录";
     const message = [`成功创建 ${data.count} 张表`, suffix, lines.join("；")].filter(Boolean).join("\n\n");
-    setMessage(els.importMsg, `导入完成：${data.count} 张表`);
+    setMessage(els.importMsg, "");
+    showGlobalNotice(`导入完成：${data.count} 张表`);
     closeImportModal();
     showImportResultModal("导入成功", message, false);
     await loadTableData();
@@ -1233,7 +1306,8 @@ async function doImport() {
     if (state.currentTable) await doQuery();
   } catch (err) {
     const message = err.message || "导入失败";
-    setMessage(els.importMsg, message, true);
+    setMessage(els.importMsg, "");
+    showGlobalNotice(message, true);
     closeImportModal();
     showImportResultModal("导入失败", message, true);
   }
@@ -1536,6 +1610,9 @@ async function init() {
 
 // 启动页面
 init();
+
+
+
 
 
 

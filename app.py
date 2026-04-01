@@ -448,6 +448,25 @@ def purge_folder(path: str) -> dict[str, Any]:
         conn.commit()
     return summary
 
+
+def purge_recycle_bin() -> dict[str, int]:
+    """清空回收站中的所有已删除文件夹和数据表。"""
+    ensure_ready()
+    recycle_folders = list_recycle_folders()
+    purged_folder_count = 0
+    purged_table_count = 0
+
+    for item in recycle_folders:
+        summary = purge_folder(item["folder_path"])
+        purged_folder_count += int(summary.get("folder_count", 0))
+        purged_table_count += int(summary.get("table_count", 0))
+
+    deleted_tables = [x for x in list_tables(include_deleted=True) if int(x.get("is_deleted", 0)) == 1]
+    for item in deleted_tables:
+        purge_table(item["table_name"])
+        purged_table_count += 1
+
+    return {"folder_count": purged_folder_count, "table_count": purged_table_count}
 def rename_table_display(table_name: str, new_name: str) -> None:
     """修改表的显示名称（不修改物理表名）"""
     record = get_table_record(table_name)
@@ -1153,6 +1172,14 @@ def create_app() -> Flask:
         except Exception as ex:
             return jsonify({"error": f"彻底删除失败: {ex}"}), 500
 
+
+    @app.delete("/api/recycle-bin/purge-all")
+    def api_purge_recycle_bin():
+        try:
+            summary = purge_recycle_bin()
+            return jsonify(summary)
+        except Exception as ex:
+            return jsonify({"error": f"清空回收站失败: {ex}"}), 500
     # 上传并导入Excel
     @app.post("/api/import-excel")
     def api_import_excel():
@@ -1250,6 +1277,7 @@ def run_app() -> None:
 # 主入口
 if __name__ == "__main__":
     run_app()
+
 
 
 

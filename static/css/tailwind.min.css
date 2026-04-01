@@ -803,3 +803,43 @@ body {
     pointer-events: auto;
   }
 }
+
+.global-notice {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  min-width: 220px;
+  max-width: min(560px, calc(100vw - 2rem));
+  padding: .75rem 1rem;
+  border-radius: 14px;
+  background: rgba(16, 65, 131, .94);
+  color: #fff;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, .22);
+  text-align: center;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+}
+
+.global-notice.hidden {
+  display: none;
+}
+
+.global-notice.is-error {
+  background: rgba(166, 33, 33, .95);
+}
+
+.recycle-modal-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.recycle-summary {
+  font-size: .9rem;
+  color: #35557d;
+  font-weight: 600;
+}

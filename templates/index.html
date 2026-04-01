@@ -10,6 +10,7 @@
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
 
+  <div id="globalNotice" class="global-notice hidden" aria-live="polite"></div>
   <div class="app-shell">
     <aside class="sidebar">
       <section class="card mb-3 table-manage-card">
@@ -120,19 +121,6 @@
         <div class="table-wrap">
           <table id="resultTable" class="table"></table>
         </div>
-          <div class="section-head mb-3">
-            <label class="label-inline">每页条数</label>
-            <select id="pageSize" class="input page-size-select">
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-            <button id="prevBtn" class="btn">上一页</button>
-            <span id="pageInfo" class="text-sm"></span>
-            <button id="nextBtn" class="btn">下一页</button>
-          </div>
-        </div>
       </section>
     </main>
   </div>
@@ -174,12 +162,15 @@
         <h3 id="recycleModalTitle" class="text-lg font-semibold">回收站</h3>
         <button id="recycleCloseBtn" class="btn btn-mini" type="button">关闭</button>
       </div>
+      <div class="recycle-modal-toolbar mb-2">
+        <div id="recycleSummary" class="recycle-summary">共 0 个已删除文件</div>
+        <button id="recyclePurgeAllBtn" class="btn btn-danger btn-mini" type="button">全部删除</button>
+      </div>
       <div id="recycleList" class="recycle-list recycle-list-modal">
         <p class="table-empty">回收站为空</p>
       </div>
     </div>
   </div>
-
   <div id="folderCreateModal" class="modal hidden" aria-hidden="true">
     <div class="modal-mask" data-folder-create-close="1"></div>
     <div class="modal-panel folder-create-modal-panel" role="dialog" aria-modal="true" aria-labelledby="folderCreateModalTitle">
@@ -257,6 +248,9 @@
 
 </body>
 </html>
+
+
+
 
 
 
