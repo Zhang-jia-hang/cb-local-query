@@ -7,6 +7,7 @@ const state = {
   columns: [],                 // 当前表所有字段
   numericColumns: [],          // 当前表数值类型字段
   hiddenColumnsByTable: {},    // 按表存储隐藏字段
+  percentColumnsByTable: {},   // 按表存储百分比换算字段
   currentTable: "",            // 当前选中的表名
   page: 1,                     // 当前页码
   totalPages: 1,               // 总页数
@@ -197,6 +198,8 @@ const els = {
   addSortBtn: document.getElementById("addSortBtn"),
 
   hiddenColumns: document.getElementById("hiddenColumns"),
+  percentColumnsPanel: document.getElementById("percentColumnsPanel"),
+  percentMsg: document.getElementById("percentMsg"),
   hideSelectedBtn: document.getElementById("hideSelectedBtn"),
   unhideSelectedBtn: document.getElementById("unhideSelectedBtn"),
   clearHiddenBtn: document.getElementById("clearHiddenBtn"),
@@ -387,6 +390,37 @@ function getQueryableNumericColumns() {
   const queryable = new Set(getQueryableColumns());
   return state.numericColumns.filter((c) => queryable.has(c));
 }
+/** 获取当前表勾选为百分比显示的字段 */
+function getPercentColumns() {
+  const table = state.currentTable;
+  if (!table) return [];
+  if (!state.percentColumnsByTable[table]) state.percentColumnsByTable[table] = [];
+  return state.percentColumnsByTable[table];
+}
+
+/** 设置当前表的百分比换算字段 */
+function setPercentColumns(columns) {
+  const table = state.currentTable;
+  if (!table) return;
+  const numericSet = new Set(state.numericColumns);
+  const unique = [...new Set(columns.filter((c) => numericSet.has(c)))];
+  state.percentColumnsByTable[table] = unique;
+}
+
+/** 切换某列的百分比显示状态 */
+function togglePercentColumn(column) {
+  const selected = new Set(getPercentColumns());
+  if (selected.has(column)) selected.delete(column);
+  else selected.add(column);
+  setPercentColumns([...selected]);
+}
+
+/** 获取可手动切换为百分比的列 */
+function getConvertibleColumns() {
+  const queryable = new Set(getQueryableColumns());
+  return state.numericColumns.filter((c) => queryable.has(c));
+}
+
 
 /** 刷新字段统计信息 */
 function refreshStats() {
@@ -420,17 +454,21 @@ function toPercentText(num) {
   return `${rounded.toFixed(2).replace(/\.?0+$/, "")}%`;
 }
 
-/** 格式化表格显示值：小数自动转百分比 */
-function formatDisplayValue(val) {
+/** 格式化表格显示值：仅对手动勾选列做百分比换算 */
+function formatDisplayValue(column, val) {
   if (val === null || val === undefined || val === "") return "";
+
+  const percentColumns = new Set(getPercentColumns());
+  if (!percentColumns.has(column)) return val;
+
   if (typeof val === "number") {
-    if (Number.isFinite(val) && !Number.isInteger(val)) return toPercentText(val);
+    if (Number.isFinite(val)) return toPercentText(val);
     return val;
   }
 
   const text = String(val).trim();
   if (!text) return "";
-  if (isFloatString(text)) {
+  if (isFloatString(text) || /^[-+]?\d+$/.test(text)) {
     const num = Number(text);
     if (Number.isFinite(num)) return toPercentText(num);
   }
@@ -1123,6 +1161,7 @@ async function loadColumns() {
     state.numericColumns = [];
     refreshFieldSelectors();
     refreshHiddenColumnsPanel();
+    refreshPercentColumnsPanel();
     refreshHeaderTags();
     return;
   }
@@ -1140,8 +1179,12 @@ async function loadColumns() {
   const stillValidHidden = getHiddenColumns().filter((c) => state.columns.includes(c));
   setHiddenColumns(stillValidHidden);
 
+  const stillValidPercent = getPercentColumns().filter((c) => state.numericColumns.includes(c));
+  setPercentColumns(stillValidPercent);
+
   refreshHeaderTags();
   refreshHiddenColumnsPanel();
+  refreshPercentColumnsPanel();
   refreshFieldSelectors();
 }
 
@@ -1164,6 +1207,40 @@ function refreshHiddenColumnsPanel() {
 
   setMessage(els.hiddenMsg, `已隐藏 ${hidden.size} / ${state.columns.length} 个字段`);
   refreshStats();
+}
+/** 刷新百分比换算字段面板 */
+function refreshPercentColumnsPanel() {
+  if (!els.percentColumnsPanel) return;
+
+  els.percentColumnsPanel.innerHTML = "";
+  if (els.percentMsg) {
+    els.percentMsg.textContent = "";
+    els.percentMsg.className = "text-sm mt-2 text-slate-600";
+  }
+
+  const columns = getConvertibleColumns();
+  if (!columns.length) {
+    if (els.percentMsg) els.percentMsg.textContent = "当前无可手动换算的数值列";
+    return;
+  }
+
+  const selected = new Set(getPercentColumns());
+  columns.forEach((col) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `btn btn-mini${selected.has(col) ? " btn-primary" : ""}`;
+    btn.textContent = selected.has(col) ? `${col} · 百分比` : col;
+    btn.onclick = () => {
+      togglePercentColumn(col);
+      refreshPercentColumnsPanel();
+      if (state.lastColumns.length) renderTable(state.lastColumns, state.lastRows);
+    };
+    els.percentColumnsPanel.appendChild(btn);
+  });
+
+  if (els.percentMsg) {
+    els.percentMsg.textContent = selected.size ? `已开启 ${selected.size} 个字段的百分比显示` : "点击列名即可切换百分比显示";
+  }
 }
 
 /** 刷新筛选条件的字段下拉选项 */
@@ -1387,7 +1464,7 @@ function renderTable(columns, rows) {
   const thead = `<thead><tr>${columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>`;
   const bodyRows = rows
     .map((row) => {
-      const tds = columns.map((c) => `<td>${escapeHtml(formatDisplayValue(row[c]))}</td>`).join("");
+      const tds = columns.map((c) => `<td>${escapeHtml(formatDisplayValue(c, row[c]))}</td>`).join("");
       return `<tr>${tds}</tr>`;
     })
     .join("");
@@ -1747,6 +1824,7 @@ function bindEvents() {
     }
     setHiddenColumns([...getHiddenColumns(), ...selected]);
     refreshHiddenColumnsPanel();
+    refreshPercentColumnsPanel();
     refreshFieldSelectors();
     state.page = 1;
     await doQuery();
@@ -1761,6 +1839,7 @@ function bindEvents() {
     }
     setHiddenColumns(getHiddenColumns().filter((c) => !selected.has(c)));
     refreshHiddenColumnsPanel();
+    refreshPercentColumnsPanel();
     refreshFieldSelectors();
     state.page = 1;
     await doQuery();
@@ -1770,6 +1849,7 @@ function bindEvents() {
   els.clearHiddenBtn.onclick = async () => {
     setHiddenColumns([]);
     refreshHiddenColumnsPanel();
+    refreshPercentColumnsPanel();
     refreshFieldSelectors();
     state.page = 1;
     await doQuery();
