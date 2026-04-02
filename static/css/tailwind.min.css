@@ -1080,3 +1080,96 @@ body {
 .table-item:hover .table-icon {
   color: #1f5fbf;
 }
+
+/* ===== Enhanced Buttons (exclude pagination buttons) ===== */
+.btn {
+  position: relative;
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease, color .18s ease, filter .18s ease;
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.10);
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):active {
+  transform: translateY(0);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14), 0 10px 22px rgba(15, 23, 42, 0.10);
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) .btn-icon {
+  transition: transform .18s ease, opacity .18s ease;
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover .btn-icon {
+  transform: scale(1.08);
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):disabled {
+  transform: none;
+  box-shadow: none;
+}
+
+.btn:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  background: linear-gradient(180deg, #2457d6 0%, #1d4fc8 55%, #163fa7 100%);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(29, 79, 200, 0.22);
+}
+
+.btn-primary:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover {
+  filter: brightness(1.02);
+  box-shadow: 0 14px 28px rgba(29, 79, 200, 0.28);
+}
+
+.btn-secondary:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  background: linear-gradient(180deg, #119d95 0%, #0f8d87 100%);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(15, 141, 135, 0.18);
+}
+
+.btn-secondary:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover {
+  filter: brightness(1.03);
+  box-shadow: 0 14px 28px rgba(15, 141, 135, 0.24);
+}
+
+.btn-success:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  background: linear-gradient(180deg, #1f9b61 0%, #187e4f 100%);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(24, 126, 79, 0.18);
+}
+
+.btn-success:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover {
+  filter: brightness(1.03);
+  box-shadow: 0 14px 28px rgba(24, 126, 79, 0.24);
+}
+
+.btn-danger:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  background: linear-gradient(180deg, #fff8f8 0%, #ffeaea 100%);
+  border-color: #ffcaca;
+  color: #c43d3d;
+}
+
+.btn-danger:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom):hover {
+  background: linear-gradient(180deg, #fff1f1 0%, #ffdede 100%);
+  border-color: #ffb5b5;
+}
+
+.btn-mini:not(#prevBtn):not(#nextBtn):not(#prevBtnBottom):not(#nextBtnBottom) {
+  border-radius: 10px;
+  padding: .38rem .58rem;
+}

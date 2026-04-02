@@ -237,6 +237,16 @@
           <select id="importFolderSelect" class="input"></select>
           <p class="text-sm text-slate-600 mt-2">不选择则导入到根目录。</p>
         </div>
+
+        <div>
+          <label class="label">或新建并导入到该文件夹</label>
+          <div class="folder-create">
+            <input id="importNewFolderInput" class="input" placeholder="例如：业务数据/华东区/2026 或 输入子目录名" />
+            <button id="importCreateFolderBtn" class="btn btn-secondary" type="button">新建并使用</button>
+          </div>
+          <p id="importFolderContext" class="text-sm text-slate-600 mt-2">当前基准位置：根目录</p>
+          <p class="text-sm text-slate-600 mt-2">从某个文件夹发起导入时，输入子目录名即可在该目录下创建；也支持直接输入多级路径。</p>
+        </div>
       </div>
 
       <p id="importModalMsg" class="text-sm mt-2 text-slate-600"></p>

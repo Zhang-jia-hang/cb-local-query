@@ -18,6 +18,7 @@ const state = {
   moveTargetDisplayName: "",  // 待移动表的显示名
   expandedFolders: new Set(),  // 左侧已展开的文件夹路径
   folderCreateParent: "",     // 当前新建文件夹的父目录
+  importTargetFolder: "",     // 导入弹窗当前目标/基准文件夹
 };
 
 let activeActionMenu = null;
@@ -124,6 +125,7 @@ function decorateStaticButtons() {
     [els.moveModalCloseBtn, "close"],
     [els.moveCreateFolderBtn, "folder"],
     [els.importConfirmBtn, "import"],
+    [els.importCreateFolderBtn, "folder"],
     [els.importCancelBtn, "close"],
     [els.importCloseBtn, "close"],
     [els.importResultConfirmBtn, "close"],
@@ -145,6 +147,9 @@ const els = {
   importCancelBtn: document.getElementById("importCancelBtn"),
   importConfirmBtn: document.getElementById("importConfirmBtn"),
   importFolderSelect: document.getElementById("importFolderSelect"),
+  importNewFolderInput: document.getElementById("importNewFolderInput"),
+  importCreateFolderBtn: document.getElementById("importCreateFolderBtn"),
+  importFolderContext: document.getElementById("importFolderContext"),
   importModalMsg: document.getElementById("importModalMsg"),
   importResultModal: document.getElementById("importResultModal"),
   importResultBody: document.getElementById("importResultBody"),
@@ -333,6 +338,19 @@ function buildCreateFolderPath(inputPath) {
   if (!state.folderCreateParent) return normalized;
   if (normalized.includes("/")) return normalized;
   return `${state.folderCreateParent}/${normalized}`;
+}
+
+function buildScopedFolderPath(inputPath, parentPath = "") {
+  const normalized = normalizeFolderPathClient(inputPath);
+  const parent = normalizeFolderPathClient(parentPath);
+  if (!normalized) return "";
+  if (!parent || normalized.includes("/")) return normalized;
+  return `${parent}/${normalized}`;
+}
+
+function updateImportFolderContext() {
+  if (!els.importFolderContext) return;
+  els.importFolderContext.textContent = `当前基准位置：${state.importTargetFolder || "根目录"}`;
 }
 function normalizeFolderPathClient(path) {
   return String(path || "")
@@ -618,6 +636,18 @@ function makeFolderRow(node, depth) {
     openFolderCreateModal(node.path);
   };
 
+
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "action-menu-item";
+  importBtn.textContent = "导入到此处";
+  setButtonIcon(importBtn, "import");
+  importBtn.onclick = () => {
+    closeActionMenu();
+    setFolderExpanded(node.path, true);
+    openImportModal(node.path);
+  };
+
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
   renameBtn.className = "action-menu-item";
@@ -654,6 +684,7 @@ function makeFolderRow(node, depth) {
   };
 
   menu.appendChild(createBtn);
+  menu.appendChild(importBtn);
   menu.appendChild(renameBtn);
   menu.appendChild(deleteBtn);
 
@@ -753,12 +784,17 @@ function renderImportFolderOptions(selectedFolder = "") {
   els.importFolderSelect.value = selected;
 }
 
-function openImportModal() {
-  renderImportFolderOptions("");
+function openImportModal(targetFolder = "") {
+  state.importTargetFolder = normalizeFolderPathClient(targetFolder);
+  renderImportFolderOptions(state.importTargetFolder);
+  updateImportFolderContext();
   if (els.importModalMsg) setMessage(els.importModalMsg, "");
   if (els.importModal) {
     els.importModal.classList.remove("hidden");
     els.importModal.setAttribute("aria-hidden", "false");
+  }
+  if (els.importNewFolderInput) {
+    els.importNewFolderInput.value = "";
   }
   if (els.excelFile) {
     els.excelFile.value = "";
@@ -767,11 +803,14 @@ function openImportModal() {
 }
 
 function closeImportModal() {
+  state.importTargetFolder = "";
   if (els.importModal) {
     els.importModal.classList.add("hidden");
     els.importModal.setAttribute("aria-hidden", "true");
   }
   if (els.importModalMsg) setMessage(els.importModalMsg, "");
+  if (els.importNewFolderInput) els.importNewFolderInput.value = "";
+  updateImportFolderContext();
 }
 
 function showImportResultModal(title, message, isError = false) {
@@ -882,6 +921,7 @@ function renderTableRow(table, depth = 0) {
 
   const menu = document.createElement("div");
   menu.className = "action-menu hidden";
+
 
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
@@ -1403,20 +1443,31 @@ async function doImport() {
     return;
   }
 
-  const folderPath = normalizeFolderPathClient(els.importFolderSelect?.value || "");
+  const createdFolderInput = els.importNewFolderInput?.value || "";
+  let folderPath = normalizeFolderPathClient(els.importFolderSelect?.value || "");
   const form = new FormData();
   form.append("file", file);
   form.append("folder_path", folderPath);
 
   try {
+    if (createdFolderInput.trim()) {
+      folderPath = await createFolder(buildScopedFolderPath(createdFolderInput, state.importTargetFolder));
+      await loadTableData();
+      renderImportFolderOptions(folderPath);
+      els.importFolderSelect.value = folderPath;
+      state.importTargetFolder = folderPath;
+      updateImportFolderContext();
+      setFolderExpanded(folderPath, true);
+      if (els.importNewFolderInput) els.importNewFolderInput.value = "";
+    }
+
+    form.set("folder_path", folderPath);
     const data = await fetchJson("/api/import-excel", { method: "POST", body: form });
-    const lines = (data.created || []).map((x) => `${x.sheet} -> ${x.display_name || x.table}`);
-    const suffix = folderPath ? `目标文件夹：${folderPath}` : "目标文件夹：根目录";
-    const message = [`成功创建 ${data.count} 张表`, suffix, lines.join("；")].filter(Boolean).join("\n\n");
     setMessage(els.importMsg, "");
     showGlobalNotice(`导入完成：${data.count} 张表`);
+    if (folderPath) setFolderExpanded(folderPath, true);
     closeImportModal();
-    
+
     await loadTableData();
     await loadColumns();
     state.page = 1;
@@ -1425,8 +1476,6 @@ async function doImport() {
     const message = err.message || "导入失败";
     setMessage(els.importMsg, "");
     showGlobalNotice(message, true);
-    closeImportModal();
-    
   }
 }
 
@@ -1498,10 +1547,46 @@ function bindEvents() {
   if (els.importCloseBtn) els.importCloseBtn.onclick = () => closeImportModal();
   if (els.importCancelBtn) els.importCancelBtn.onclick = () => closeImportModal();
   if (els.importConfirmBtn) els.importConfirmBtn.onclick = doImport;
+  if (els.importCreateFolderBtn) {
+    els.importCreateFolderBtn.onclick = async () => {
+      try {
+        const created = await createFolder(buildScopedFolderPath(els.importNewFolderInput?.value || "", state.importTargetFolder));
+        await loadTableData();
+        renderImportFolderOptions(created);
+        els.importFolderSelect.value = created;
+        state.importTargetFolder = created;
+        updateImportFolderContext();
+        setFolderExpanded(created, true);
+        if (els.importNewFolderInput) els.importNewFolderInput.value = "";
+        setMessage(els.importModalMsg, `文件夹创建成功：${created}`);
+      } catch (err) {
+        setMessage(els.importModalMsg, err.message || "创建文件夹失败", true);
+      }
+    };
+  }
   if (els.importModal) {
     els.importModal.addEventListener("click", (e) => {
       if (!(e.target instanceof HTMLElement)) return;
       if (e.target.dataset.importClose === "1") closeImportModal();
+    });
+  }
+  if (els.importFolderSelect) {
+    els.importFolderSelect.onchange = () => {
+      state.importTargetFolder = normalizeFolderPathClient(els.importFolderSelect.value || "");
+      updateImportFolderContext();
+      if (els.importNewFolderInput?.value.trim()) return;
+      setMessage(els.importModalMsg, "");
+    };
+  }
+  if (els.importNewFolderInput) {
+    els.importNewFolderInput.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        await doImport();
+        return;
+      }
+      els.importCreateFolderBtn?.click();
     });
   }
   if (els.importResultCloseBtn) els.importResultCloseBtn.onclick = () => closeImportResultModal();
