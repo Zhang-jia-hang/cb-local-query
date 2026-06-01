@@ -222,6 +222,9 @@ body {
 .input:focus { outline: none; border-color: #8fc0ff; box-shadow: 0 0 0 4px rgba(59, 130, 246, .12); }
 
 .page-size-select { width: 86px; min-width: 86px; padding-right: .3rem; }
+.page-jump-wrap { display: inline-flex; align-items: center; gap: .35rem; flex-wrap: nowrap; }
+.page-jump-input { width: 4.2rem; min-width: 4.2rem; padding: .35rem .45rem; text-align: center; }
+.page-jump-total { color: #48627f; font-size: .85rem; white-space: nowrap; }
 
 .multi-select { min-height: 130px; padding: .4rem; }
 .multi-select option { padding: .35rem .45rem; border-radius: 8px; }

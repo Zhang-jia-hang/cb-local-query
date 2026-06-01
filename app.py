@@ -703,6 +703,104 @@ def import_excel_to_sqlite(file_stream: io.BytesIO, folder_path: str = "") -> di
         conn.commit()
 
     return {"created": created, "count": len(created)}
+
+
+def _normalize_excel_column_names(src_columns: list[Any]) -> list[str]:
+    """将 Excel 表头规范化为列名（与导入逻辑一致，含同表头去重后缀）。"""
+    cols: list[str] = []
+    seen_cols: set[str] = set()
+    for cidx, col in enumerate(src_columns, start=1):
+        col_name = _normalize_identifier(str(col), f"col_{cidx}")
+        candidate = col_name
+        csuffix = 1
+        while candidate in seen_cols:
+            csuffix += 1
+            candidate = f"{col_name}_{csuffix}"
+        seen_cols.add(candidate)
+        cols.append(candidate)
+    return cols
+
+
+def append_excel_to_table(table_name: str, file_stream: io.BytesIO, sheet_name: str | None = None) -> dict[str, Any]:
+    """
+    向已有表追加 Excel 数据：
+    1. 表头经规范化后须与目标表列名集合完全一致
+    2. 仅追加行，不修改表结构
+    """
+    assert_active_table(table_name)
+    existing_cols = get_columns(table_name)
+    if not existing_cols:
+        raise ValueError("目标表没有可用列")
+
+    xls = pd.ExcelFile(file_stream, engine="openpyxl")
+    if not xls.sheet_names:
+        raise ValueError("Excel 文件中没有工作表")
+
+    target_sheet = (sheet_name or "").strip()
+    if target_sheet:
+        if target_sheet not in xls.sheet_names:
+            raise ValueError(f"未找到工作表: {target_sheet}")
+    else:
+        target_sheet = xls.sheet_names[0]
+
+    df = pd.read_excel(xls, sheet_name=target_sheet)
+    if df.empty:
+        raise ValueError("追加文件没有数据行")
+
+    src_columns = list(df.columns)
+    normalized_cols = _normalize_excel_column_names(src_columns)
+    existing_set = set(existing_cols)
+
+    if set(normalized_cols) != existing_set:
+        missing = sorted(existing_set - set(normalized_cols))
+        extra = sorted(set(normalized_cols) - existing_set)
+        parts: list[str] = []
+        if missing:
+            parts.append(f"缺少列: {', '.join(missing)}")
+        if extra:
+            parts.append(f"多余列: {', '.join(extra)}")
+        detail = "；".join(parts) if parts else "列名不一致"
+        raise ValueError(f"表头与目标表不一致，{detail}")
+
+    if len(normalized_cols) != len(existing_cols):
+        raise ValueError("表头列数与目标表不一致，请检查是否存在重复列名")
+
+    src_numeric_flags = [_is_numeric_series(df[c]) for c in src_columns]
+    df = df.fillna("")
+    df.columns = normalized_cols
+    df = df[existing_cols]
+
+    numeric_cols = {c for c, is_num in zip(existing_cols, src_numeric_flags) if is_num}
+    now = now_str()
+
+    with get_conn() as conn:
+        before_count = conn.execute(
+            f"SELECT COUNT(1) AS c FROM {_quote_ident(table_name)}"
+        ).fetchone()["c"]
+        df.to_sql(table_name, conn, if_exists="append", index=False)
+        after_count = conn.execute(
+            f"SELECT COUNT(1) AS c FROM {_quote_ident(table_name)}"
+        ).fetchone()["c"]
+
+        known_numeric = get_numeric_columns(table_name, existing_cols)
+        merged_numeric = known_numeric | numeric_cols
+        if not merged_numeric:
+            merged_numeric = _infer_numeric_columns_from_table(table_name, existing_cols)
+        else:
+            inferred = _infer_numeric_columns_from_table(table_name, existing_cols)
+            merged_numeric |= inferred
+        _save_column_meta(conn, table_name, existing_cols, merged_numeric, now)
+        conn.commit()
+
+    appended_rows = int(after_count) - int(before_count)
+    return {
+        "table": table_name,
+        "sheet": target_sheet,
+        "appended_rows": appended_rows,
+        "total_rows": int(after_count),
+    }
+
+
 # ===================== 查询构建工具 =====================
 def apply_hidden_columns(all_columns: list[str], hidden_columns: list[str]) -> list[str]:
     """过滤隐藏列，返回前端可见列"""
@@ -1180,6 +1278,25 @@ def create_app() -> Flask:
             return jsonify(summary)
         except Exception as ex:
             return jsonify({"error": f"清空回收站失败: {ex}"}), 500
+    # 向已有表追加 Excel 数据
+    @app.post("/api/table/<table>/append-excel")
+    def api_append_excel(table: str):
+        if "file" not in request.files:
+            return jsonify({"error": "missing file"}), 400
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "invalid file"}), 400
+
+        sheet_name = request.form.get("sheet_name", "").strip() or None
+        content = io.BytesIO(file.read())
+        try:
+            summary = append_excel_to_table(table, content, sheet_name=sheet_name)
+            return jsonify(summary)
+        except ValueError as ex:
+            return jsonify({"error": str(ex)}), 400
+        except Exception as ex:
+            return jsonify({"error": f"追加失败: {ex}"}), 500
+
     # 上传并导入Excel
     @app.post("/api/import-excel")
     def api_import_excel():
@@ -1277,15 +1394,3 @@ def run_app() -> None:
 # 主入口
 if __name__ == "__main__":
     run_app()
-
-
-
-
-
-
-
-
-
-
-
-

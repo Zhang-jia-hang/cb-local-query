@@ -20,6 +20,8 @@ const state = {
   expandedFolders: new Set(),  // 左侧已展开的文件夹路径
   folderCreateParent: "",     // 当前新建文件夹的父目录
   importTargetFolder: "",     // 导入弹窗当前目标/基准文件夹
+  appendTargetTable: "",      // 待追加数据的目标表
+  appendTargetDisplayName: "", // 待追加数据的目标表显示名
 };
 
 let activeActionMenu = null;
@@ -131,6 +133,9 @@ function decorateStaticButtons() {
     [els.importCloseBtn, "close"],
     [els.importResultConfirmBtn, "close"],
     [els.importResultCloseBtn, "close"],
+    [els.appendConfirmBtn, "import"],
+    [els.appendCancelBtn, "close"],
+    [els.appendCloseBtn, "close"],
     [els.recycleCloseBtn, "close"],
     [els.createFolderBtn, "folder"],
     [els.folderCreateCancelBtn, "close"],
@@ -156,6 +161,15 @@ const els = {
   importResultBody: document.getElementById("importResultBody"),
   importResultCloseBtn: document.getElementById("importResultCloseBtn"),
   importResultConfirmBtn: document.getElementById("importResultConfirmBtn"),
+  appendModal: document.getElementById("appendModal"),
+  appendCloseBtn: document.getElementById("appendCloseBtn"),
+  appendCancelBtn: document.getElementById("appendCancelBtn"),
+  appendConfirmBtn: document.getElementById("appendConfirmBtn"),
+  appendExcelFile: document.getElementById("appendExcelFile"),
+  appendModalTitle: document.getElementById("appendModalTitle"),
+  appendTableContext: document.getElementById("appendTableContext"),
+  appendColumnsHint: document.getElementById("appendColumnsHint"),
+  appendModalMsg: document.getElementById("appendModalMsg"),
   recycleSummary: document.getElementById("recycleSummary"),
   recyclePurgeAllBtn: document.getElementById("recyclePurgeAllBtn"),
   globalNotice: document.getElementById("globalNotice"),
@@ -214,10 +228,20 @@ const els = {
 
   queryMsg: document.getElementById("queryMsg"),
   resultTable: document.getElementById("resultTable"),
+  firstBtn: document.getElementById("firstBtn"),
+  firstBtnBottom: document.getElementById("firstBtnBottom"),
   prevBtn: document.getElementById("prevBtn"),
   prevBtnBottom: document.getElementById("prevBtnBottom"),
   nextBtn: document.getElementById("nextBtn"),
   nextBtnBottom: document.getElementById("nextBtnBottom"),
+  lastBtn: document.getElementById("lastBtn"),
+  lastBtnBottom: document.getElementById("lastBtnBottom"),
+  pageJumpInput: document.getElementById("pageJumpInput"),
+  pageJumpInputBottom: document.getElementById("pageJumpInputBottom"),
+  pageJumpBtn: document.getElementById("pageJumpBtn"),
+  pageJumpBtnBottom: document.getElementById("pageJumpBtnBottom"),
+  pageJumpTotal: document.getElementById("pageJumpTotal"),
+  pageJumpTotalBottom: document.getElementById("pageJumpTotalBottom"),
   pageInfo: document.getElementById("pageInfo"),
   pageInfoBottom: document.getElementById("pageInfoBottom"),
 };
@@ -234,15 +258,16 @@ function setMessage(el, text, isError = false) {
 }
 
 /** 设置查询状态：禁用/启用按钮，防止重复提交 */
+function getPageJumpInputs() {
+  return [els.pageJumpInput, els.pageJumpInputBottom].filter(Boolean);
+}
+
 function setQueryBusy(busy) {
   state.querying = busy;
   els.searchBtn.disabled = busy;
   els.exportBtn.disabled = busy;
-  els.prevBtn.disabled = busy;
-  if (els.prevBtnBottom) els.prevBtnBottom.disabled = busy;
-  els.nextBtn.disabled = busy;
-  if (els.nextBtnBottom) els.nextBtnBottom.disabled = busy;
   els.searchBtn.textContent = busy ? "查询中..." : "查询";
+  syncPagerState();
 }
 
 /** 创建下拉选项 */
@@ -253,18 +278,53 @@ function createOption(value, label) {
   return op;
 }
 
-/** 清空结果表格，显示空数据提示 */
+/** 同步分页控件状态（页码文案、按钮禁用、跳转输入框） */
 function syncPagerState() {
   const pageSizeValue = String(els.pageSize?.value || "20");
   if (els.pageSizeBottom) els.pageSizeBottom.value = pageSizeValue;
-  const pageText = state.total ? `第 ${state.page} / ${state.totalPages} 页，共 ${state.total} 条` : "";
+
+  const hasData = state.total > 0;
+  const totalPages = Math.max(1, state.totalPages || 1);
+  const pageText = hasData ? `第 ${state.page} / ${totalPages} 页，共 ${state.total} 条` : "";
   if (els.pageInfo) els.pageInfo.textContent = pageText;
   if (els.pageInfoBottom) els.pageInfoBottom.textContent = pageText;
+
+  const totalText = `/ ${totalPages} 页`;
+  if (els.pageJumpTotal) els.pageJumpTotal.textContent = totalText;
+  if (els.pageJumpTotalBottom) els.pageJumpTotalBottom.textContent = totalText;
+
+  const atFirst = !hasData || state.page <= 1;
+  const atLast = !hasData || state.page >= totalPages;
+  const pagerDisabled = !hasData || state.querying;
+
+  [els.firstBtn, els.firstBtnBottom, els.prevBtn, els.prevBtnBottom].forEach((btn) => {
+    if (btn) btn.disabled = atFirst || state.querying;
+  });
+  [els.nextBtn, els.nextBtnBottom, els.lastBtn, els.lastBtnBottom].forEach((btn) => {
+    if (btn) btn.disabled = atLast || state.querying;
+  });
+  [els.pageJumpBtn, els.pageJumpBtnBottom].forEach((btn) => {
+    if (btn) btn.disabled = pagerDisabled;
+  });
+  getPageJumpInputs().forEach((input) => {
+    input.disabled = pagerDisabled;
+    input.min = "1";
+    input.max = String(totalPages);
+    if (hasData) input.value = String(state.page);
+    else input.value = "";
+  });
 }
+
 function clearTableView(message = "暂无数据") {
   els.resultTable.innerHTML = `<tr><td class='p-3'>${message}</td></tr>`;
-  if (els.pageInfo) els.pageInfo.textContent = "";
-  if (els.pageInfoBottom) els.pageInfoBottom.textContent = "";
+  syncPagerState();
+}
+
+function resetPagerState() {
+  state.page = 1;
+  state.total = 0;
+  state.totalPages = 1;
+  syncPagerState();
 }
 
 /** 获取当前选中表的元数据 */
@@ -869,6 +929,100 @@ function closeImportResultModal() {
   els.importResultModal.classList.add("hidden");
   els.importResultModal.setAttribute("aria-hidden", "true");
 }
+
+function openAppendModal(table) {
+  state.appendTargetTable = table.table_name;
+  state.appendTargetDisplayName = table.display_name || table.table_name;
+
+  if (els.appendModalTitle) {
+    els.appendModalTitle.textContent = `追加数据：${state.appendTargetDisplayName}`;
+  }
+  if (els.appendTableContext) {
+    els.appendTableContext.textContent = `目标表：${state.appendTargetDisplayName}`;
+  }
+  if (els.appendColumnsHint) {
+    const cols = state.currentTable === table.table_name && state.columns.length
+      ? state.columns.join("、")
+      : "（选择表后将显示列名）";
+    els.appendColumnsHint.textContent =
+      state.currentTable === table.table_name && state.columns.length
+        ? `当前表列名：${cols}`
+        : "请使用与当前表一致的表头（列名）。可先选中该表查看列名。";
+  }
+  if (els.appendModalMsg) setMessage(els.appendModalMsg, "");
+  if (els.appendExcelFile) {
+    els.appendExcelFile.value = "";
+  }
+  if (els.appendModal) {
+    els.appendModal.classList.remove("hidden");
+    els.appendModal.setAttribute("aria-hidden", "false");
+    els.appendExcelFile?.focus();
+  }
+
+  if (!(state.currentTable === table.table_name && state.columns.length)) {
+    fetchTableColumns(table.table_name).then((cols) => {
+      if (state.appendTargetTable !== table.table_name || !els.appendColumnsHint) return;
+      if (cols.length) {
+        els.appendColumnsHint.textContent = `当前表列名：${cols.join("、")}`;
+      }
+    });
+  }
+}
+
+async function fetchTableColumns(tableName) {
+  if (!tableName) return [];
+  try {
+    const data = await fetchJson(`/api/table/${encodeURIComponent(tableName)}/columns`);
+    return data.columns || [];
+  } catch {
+    return [];
+  }
+}
+
+function closeAppendModal() {
+  state.appendTargetTable = "";
+  state.appendTargetDisplayName = "";
+  if (els.appendModal) {
+    els.appendModal.classList.add("hidden");
+    els.appendModal.setAttribute("aria-hidden", "true");
+  }
+  if (els.appendModalMsg) setMessage(els.appendModalMsg, "");
+  if (els.appendExcelFile) els.appendExcelFile.value = "";
+}
+
+async function doAppend() {
+  const file = els.appendExcelFile?.files?.[0];
+  if (!state.appendTargetTable) {
+    setMessage(els.appendModalMsg, "未找到要追加的数据表", true);
+    return;
+  }
+  if (!file) {
+    setMessage(els.appendModalMsg, "请选择 Excel 文件", true);
+    return;
+  }
+
+  const form = new FormData();
+  form.append("file", file);
+
+  const targetTable = state.appendTargetTable;
+
+  try {
+    const data = await fetchJson(`/api/table/${encodeURIComponent(targetTable)}/append-excel`, {
+      method: "POST",
+      body: form,
+    });
+    closeAppendModal();
+    showGlobalNotice(`追加完成：新增 ${data.appended_rows} 行，当前共 ${data.total_rows} 行`);
+    if (state.currentTable === targetTable) {
+      state.page = 1;
+      await loadColumns();
+      await doQuery();
+    }
+  } catch (err) {
+    setMessage(els.appendModalMsg, err.message || "追加失败", true);
+  }
+}
+
 function closeMoveModal() {
   els.moveModal.classList.add("hidden");
   els.moveModal.setAttribute("aria-hidden", "true");
@@ -993,6 +1147,16 @@ function renderTableRow(table, depth = 0) {
     openMoveModal(table);
   };
 
+  const appendBtn = document.createElement("button");
+  appendBtn.type = "button";
+  appendBtn.className = "action-menu-item";
+  appendBtn.textContent = "追加数据";
+  setButtonIcon(appendBtn, "import");
+  appendBtn.onclick = () => {
+    closeActionMenu();
+    openAppendModal(table);
+  };
+
   const delBtn = document.createElement("button");
   delBtn.type = "button";
   delBtn.className = "action-menu-item danger";
@@ -1011,6 +1175,7 @@ function renderTableRow(table, depth = 0) {
       if (state.currentTable) {
         await doQuery();
       } else {
+        resetPagerState();
         clearTableView("请先选择数据表");
       }
       setMessage(els.importMsg, "已移入回收站");
@@ -1020,6 +1185,7 @@ function renderTableRow(table, depth = 0) {
   };
 
   menu.appendChild(renameBtn);
+  menu.appendChild(appendBtn);
   menu.appendChild(moveBtn);
   menu.appendChild(delBtn);
 
@@ -1478,6 +1644,7 @@ async function doQuery() {
   const payload = collectPayload();
   if (!payload.table) {
     setMessage(els.queryMsg, "请先在左侧选择数据表", true);
+    resetPagerState();
     clearTableView("请先在左侧选择数据表");
     return;
   }
@@ -1675,6 +1842,16 @@ function bindEvents() {
     });
   }
 
+  if (els.appendCloseBtn) els.appendCloseBtn.onclick = () => closeAppendModal();
+  if (els.appendCancelBtn) els.appendCancelBtn.onclick = () => closeAppendModal();
+  if (els.appendConfirmBtn) els.appendConfirmBtn.onclick = doAppend;
+  if (els.appendModal) {
+    els.appendModal.addEventListener("click", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
+      if (e.target.dataset.appendClose === "1") closeAppendModal();
+    });
+  }
+
   if (els.recycleToggleBtn && els.recycleModal) {
     els.recycleToggleBtn.onclick = () => {
       els.recycleModal.classList.remove("hidden");
@@ -1800,6 +1977,9 @@ function bindEvents() {
     if (e.key === "Escape" && els.importResultModal && !els.importResultModal.classList.contains("hidden")) {
       closeImportResultModal();
     }
+    if (e.key === "Escape" && els.appendModal && !els.appendModal.classList.contains("hidden")) {
+      closeAppendModal();
+    }
     if (e.key === "Escape") closeActionMenu();
     if (e.key === "Escape" && els.folderCreateModal && !els.folderCreateModal.classList.contains("hidden")) {
       closeFolderCreateModal();
@@ -1874,6 +2054,18 @@ function bindEvents() {
   els.exportBtn.onclick = doExport;
 
   // 分页
+  const goFirstPage = async () => {
+    if (state.page <= 1 || !state.total) return;
+    state.page = 1;
+    await doQuery();
+  };
+
+  const goLastPage = async () => {
+    if (!state.total || state.page >= state.totalPages) return;
+    state.page = state.totalPages;
+    await doQuery();
+  };
+
   const goPrevPage = async () => {
     if (state.page <= 1) return;
     state.page -= 1;
@@ -1886,6 +2078,37 @@ function bindEvents() {
     await doQuery();
   };
 
+  const submitPageJump = async (inputEl) => {
+    if (!state.total) return;
+    const raw = String((inputEl || els.pageJumpInput)?.value ?? "").trim();
+    const target = Number.parseInt(raw, 10);
+    const totalPages = Math.max(1, state.totalPages || 1);
+
+    if (!Number.isFinite(target)) {
+      setMessage(els.queryMsg, "请输入有效页码", true);
+      syncPagerState();
+      return;
+    }
+    if (target < 1 || target > totalPages) {
+      setMessage(els.queryMsg, `页码范围为 1 ~ ${totalPages}`, true);
+      syncPagerState();
+      return;
+    }
+    if (target === state.page) return;
+    state.page = target;
+    await doQuery();
+  };
+
+  const bindPageJumpInput = (inputEl, jumpBtnEl) => {
+    if (!inputEl) return;
+    inputEl.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      await submitPageJump(inputEl);
+    });
+    if (jumpBtnEl) jumpBtnEl.onclick = () => submitPageJump(inputEl);
+  };
+
   const onPageSizeChange = async (value) => {
     if (els.pageSize) els.pageSize.value = value;
     if (els.pageSizeBottom) els.pageSizeBottom.value = value;
@@ -1893,11 +2116,20 @@ function bindEvents() {
     await doQuery();
   };
 
+  if (els.firstBtn) els.firstBtn.onclick = goFirstPage;
+  if (els.firstBtnBottom) els.firstBtnBottom.onclick = goFirstPage;
+
   els.prevBtn.onclick = goPrevPage;
   if (els.prevBtnBottom) els.prevBtnBottom.onclick = goPrevPage;
 
   els.nextBtn.onclick = goNextPage;
   if (els.nextBtnBottom) els.nextBtnBottom.onclick = goNextPage;
+
+  if (els.lastBtn) els.lastBtn.onclick = goLastPage;
+  if (els.lastBtnBottom) els.lastBtnBottom.onclick = goLastPage;
+
+  bindPageJumpInput(els.pageJumpInput, els.pageJumpBtn);
+  bindPageJumpInput(els.pageJumpInputBottom, els.pageJumpBtnBottom);
 
   els.pageSize.onchange = async () => {
     await onPageSizeChange(String(els.pageSize.value || "20"));
@@ -1922,6 +2154,7 @@ async function init() {
   await loadTableData();
   await loadColumns();
   if (state.currentTable) await doQuery();
+  else syncPagerState();
 }
 
 // 启动页面

@@ -119,8 +119,16 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
+            <button id="firstBtn" class="btn" type="button">首页</button>
             <button id="prevBtn" class="btn" type="button">上一页</button>
+            <span class="page-jump-wrap">
+              <label class="label-inline" for="pageJumpInput">跳至</label>
+              <input id="pageJumpInput" class="input page-jump-input" type="number" min="1" step="1" inputmode="numeric" aria-label="页码" />
+              <span class="page-jump-total" id="pageJumpTotal">/ 1 页</span>
+              <button id="pageJumpBtn" class="btn btn-secondary" type="button">跳转</button>
+            </span>
             <button id="nextBtn" class="btn" type="button">下一页</button>
+            <button id="lastBtn" class="btn" type="button">末页</button>
           </div>
         </div>
 
@@ -138,8 +146,16 @@
               <option value="50">50</option>
               <option value="100">100</option>
             </select>
+            <button id="firstBtnBottom" class="btn" type="button">首页</button>
             <button id="prevBtnBottom" class="btn" type="button">上一页</button>
+            <span class="page-jump-wrap">
+              <label class="label-inline" for="pageJumpInputBottom">跳至</label>
+              <input id="pageJumpInputBottom" class="input page-jump-input" type="number" min="1" step="1" inputmode="numeric" aria-label="页码" />
+              <span class="page-jump-total" id="pageJumpTotalBottom">/ 1 页</span>
+              <button id="pageJumpBtnBottom" class="btn btn-secondary" type="button">跳转</button>
+            </span>
             <button id="nextBtnBottom" class="btn" type="button">下一页</button>
+            <button id="lastBtnBottom" class="btn" type="button">末页</button>
           </div>
         </div>
       </section>
@@ -263,6 +279,35 @@
       </div>
     </div>
   </div>
+  <div id="appendModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-mask" data-append-close="1"></div>
+    <div class="modal-panel import-modal-panel" role="dialog" aria-modal="true" aria-labelledby="appendModalTitle">
+      <div class="section-head mb-2">
+        <h3 id="appendModalTitle" class="text-lg font-semibold">追加数据</h3>
+        <button id="appendCloseBtn" class="btn btn-mini" type="button">关闭</button>
+      </div>
+
+      <div class="import-form">
+        <p id="appendTableContext" class="text-sm text-slate-600">目标表：-</p>
+        <p id="appendColumnsHint" class="text-sm text-slate-600 mt-2">请使用与当前表一致的表头（列名）。</p>
+        <div>
+          <label class="label">选择 Excel 文件</label>
+          <div class="upload-shell upload-shell-large">
+            <input id="appendExcelFile" type="file" accept=".xlsx,.xls" class="input upload-input" />
+          </div>
+          <p class="text-sm text-slate-600 mt-2">默认读取第一个工作表；表头须与目标表列一致。</p>
+        </div>
+      </div>
+
+      <p id="appendModalMsg" class="text-sm mt-2 text-slate-600"></p>
+
+      <div class="modal-actions">
+        <button id="appendConfirmBtn" class="btn btn-primary" type="button">确认追加</button>
+        <button id="appendCancelBtn" class="btn" type="button">取消</button>
+      </div>
+    </div>
+  </div>
+
   <div id="importResultModal" class="modal hidden" aria-hidden="true">
     <div class="modal-mask" data-import-result-close="1"></div>
     <div class="modal-panel import-result-modal-panel" role="dialog" aria-modal="true" aria-labelledby="importResultModalTitle">
